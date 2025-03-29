@@ -1,74 +1,81 @@
 import { ethers } from "hardhat";
 import { config } from "dotenv";
+import * as fs from "fs";
 
 config();
 
 async function main() {
   // Get environment variables
-  const usdcAddress = process.env.USDC_ADDRESS;
-  const treasuryAddress = process.env.TREASURY_ADDRESS;
-  const usdcWalletAddress = process.env.USDC_WALLET_ADDRESS;
-  const aiAgentAddress = process.env.AI_AGENT_ADDRESS;
+  const usdcAddress = ethers.getAddress("0x036cbd53842c5426634e7929541ec2318f3dcf7c"); // Base Sepolia USDC
+  const [deployer] = await ethers.getSigners();
 
-  if (!usdcAddress || !treasuryAddress || !usdcWalletAddress || !aiAgentAddress) {
-    throw new Error("Missing required environment variables");
-  }
-
-  console.log("Starting deployment...");
+  console.log("Deploying contracts with account:", deployer.address);
+  console.log("Account balance:", ethers.formatEther(await deployer.provider.getBalance(deployer.address)));
 
   // Deploy OverOrUnderToken
   console.log("\nDeploying OverOrUnderToken...");
   const OverOrUnderToken = await ethers.getContractFactory("OverOrUnderToken");
   const token = await OverOrUnderToken.deploy(
-    usdcAddress,
-    treasuryAddress,
-    usdcWalletAddress
+    usdcAddress,      // USDC address
+    deployer.address, // Treasury (initially set to deployer)
+    deployer.address  // USDC wallet (initially set to deployer)
   );
-  await token.deployed();
-  console.log("OverOrUnderToken deployed to:", token.address);
+  await token.waitForDeployment();
+  const tokenAddress = await token.getAddress();
+  console.log("OverOrUnderToken deployed to:", tokenAddress);
 
   // Deploy BettingContract
   console.log("\nDeploying BettingContract...");
   const BettingContract = await ethers.getContractFactory("BettingContract");
   const betting = await BettingContract.deploy(
-    token.address,
-    aiAgentAddress,
-    treasuryAddress
+    tokenAddress,     // Token address
+    deployer.address, // AI agent (initially set to deployer)
+    deployer.address  // Treasury (initially set to deployer)
   );
-  await betting.deployed();
-  console.log("BettingContract deployed to:", betting.address);
+  await betting.waitForDeployment();
+  const bettingAddress = await betting.getAddress();
+  console.log("BettingContract deployed to:", bettingAddress);
 
-  // Transfer initial tokens to betting contract
-  console.log("\nTransferring initial tokens to betting contract...");
-  const initialTokens = ethers.parseEther("1000000"); // 1M tokens
-  await token.transfer(betting.address, initialTokens);
-  console.log("Initial tokens transferred successfully");
+  // Deploy Faucet
+  console.log("\nDeploying Faucet...");
+  const Faucet = await ethers.getContractFactory("Faucet");
+  const faucet = await Faucet.deploy(tokenAddress);
+  await faucet.waitForDeployment();
+  const faucetAddress = await faucet.getAddress();
+  console.log("Faucet deployed to:", faucetAddress);
 
-  // Set up AI agent address in betting contract
-  console.log("\nSetting up AI agent address...");
-  await betting.setAIAgent(aiAgentAddress);
-  console.log("AI agent address set successfully");
+  // Fund contracts with initial tokens
+  console.log("\nFunding contracts with initial tokens...");
+  const bettingTokens = ethers.parseEther("1000000"); // 1M tokens for betting
+  const faucetTokens = ethers.parseEther("100000");   // 100K tokens for faucet
+  
+  console.log("Transferring tokens to betting contract...");
+  await token.transfer(bettingAddress, bettingTokens);
+  
+  console.log("Transferring tokens to faucet...");
+  await token.transfer(faucetAddress, faucetTokens);
+  
+  console.log("Initial token transfers completed");
 
   // Log deployment summary
   console.log("\nDeployment Summary:");
   console.log("------------------");
-  console.log("OverOrUnderToken:", token.address);
-  console.log("BettingContract:", betting.address);
+  console.log("OverOrUnderToken:", tokenAddress);
+  console.log("BettingContract:", bettingAddress);
+  console.log("Faucet:", faucetAddress);
   console.log("USDC Address:", usdcAddress);
-  console.log("Treasury Address:", treasuryAddress);
-  console.log("USDC Wallet Address:", usdcWalletAddress);
-  console.log("AI Agent Address:", aiAgentAddress);
-  console.log("Initial Tokens:", ethers.formatEther(initialTokens));
+  console.log("Initial Betting Tokens:", ethers.formatEther(bettingTokens));
+  console.log("Initial Faucet Tokens:", ethers.formatEther(faucetTokens));
+  console.log("\nNote: Treasury, USDC wallet, and AI agent are all set to deployer address:", deployer.address);
+  console.log("You can update these addresses later using the respective setter functions.");
 
   // Save deployment addresses to a file
-  const fs = require("fs");
   const deploymentInfo = {
-    token: token.address,
-    betting: betting.address,
+    token: tokenAddress,
+    betting: bettingAddress,
+    faucet: faucetAddress,
     usdc: usdcAddress,
-    treasury: treasuryAddress,
-    usdcWallet: usdcWalletAddress,
-    aiAgent: aiAgentAddress,
+    deployer: deployer.address,
     timestamp: new Date().toISOString(),
   };
 
@@ -77,6 +84,17 @@ async function main() {
     JSON.stringify(deploymentInfo, null, 2)
   );
   console.log("\nDeployment information saved to deployment.json");
+
+  // Update .env file
+  const envContent = `PRIVATE_KEY=${process.env.PRIVATE_KEY}
+RPC_URL=${process.env.RPC_URL}
+USDC_ADDRESS=${usdcAddress}
+TOKEN_CONTRACT_ADDRESS=${tokenAddress}
+BETTING_CONTRACT_ADDRESS=${bettingAddress}
+FAUCET_CONTRACT_ADDRESS=${faucetAddress}`;
+
+  fs.writeFileSync(".env", envContent);
+  console.log("\nEnvironment variables updated in .env file");
 }
 
 main()

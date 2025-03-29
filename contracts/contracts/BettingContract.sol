@@ -46,7 +46,8 @@ contract BettingContract is Ownable, ReentrancyGuard {
         address _token,
         address _aiAgent,
         address _treasury
-    ) Ownable(msg.sender) {
+    ) {
+        _transferOwnership(msg.sender);
         token = OverOrUnderToken(_token);
         aiAgent = _aiAgent;
         treasury = _treasury;
