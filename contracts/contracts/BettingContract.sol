@@ -53,6 +53,18 @@ contract BettingContract is Ownable, ReentrancyGuard {
         treasury = _treasury;
     }
 
+    function updateAiAgent(address _newAiAgent) external virtual onlyOwner {
+        require(_newAiAgent != address(0), "Invalid AI agent address");
+        aiAgent = _newAiAgent;
+        emit AiAgentUpdated(_newAiAgent);
+    }
+
+    function updateTreasury(address _newTreasury) external virtual onlyOwner {
+        require(_newTreasury != address(0), "Invalid treasury address");
+        treasury = _newTreasury;
+        emit TreasuryUpdated(_newTreasury);
+    }
+
     function createMarket(uint256 aiPrediction) external {
         require(msg.sender == aiAgent, "Only AI agent can create markets");
         require(markets.length == 0 || markets[markets.length - 1].settled, "Previous market not settled");
@@ -116,38 +128,38 @@ contract BettingContract is Ownable, ReentrancyGuard {
 
         uint256 overBet = market.overBets[msg.sender];
         uint256 underBet = market.underBets[msg.sender];
-        require(overBet > 0 || underBet > 0, "No bets placed");
-
-        bool isOver = overBet > 0;
-        uint256 betAmount = isOver ? overBet : underBet;
-        uint256 totalWinningPool = isOver ? market.totalUnderBets : market.totalOverBets;
-        uint256 totalLosingPool = isOver ? market.totalOverBets : market.totalUnderBets;
-
-        uint256 winnings = 0;
-        if ((isOver && market.actualPrice > market.aiPrediction) ||
-            (!isOver && market.actualPrice < market.aiPrediction)) {
-            uint256 platformFee = (totalWinningPool * PLATFORM_FEE) / 100;
-            winnings = betAmount + (betAmount * (totalWinningPool - platformFee)) / totalLosingPool;
-        }
+        require(overBet > 0 || underBet > 0, "No bets to claim");
 
         market.hasClaimed[msg.sender] = true;
-        if (winnings > 0) {
-            require(token.transfer(msg.sender, winnings), "Token transfer failed");
+
+        uint256 winnings = 0;
+        if (market.actualPrice > market.aiPrediction) {
+            // Over betters win
+            if (overBet > 0) {
+                winnings = calculateWinnings(overBet, market.totalOverBets, market.totalUnderBets);
+            }
+        } else {
+            // Under betters win
+            if (underBet > 0) {
+                winnings = calculateWinnings(underBet, market.totalUnderBets, market.totalOverBets);
+            }
         }
 
-        emit WinningsClaimed(marketId, msg.sender, winnings);
+        if (winnings > 0) {
+            require(token.transfer(msg.sender, winnings), "Transfer failed");
+            emit WinningsClaimed(marketId, msg.sender, winnings);
+        }
     }
 
-    function setAiAgent(address _aiAgent) external onlyOwner {
-        require(_aiAgent != address(0), "Invalid AI agent address");
-        aiAgent = _aiAgent;
-        emit AiAgentUpdated(_aiAgent);
-    }
-
-    function setTreasury(address _treasury) external onlyOwner {
-        require(_treasury != address(0), "Invalid treasury address");
-        treasury = _treasury;
-        emit TreasuryUpdated(_treasury);
+    function calculateWinnings(
+        uint256 betAmount,
+        uint256 totalWinningBets,
+        uint256 totalLosingBets
+    ) internal pure returns (uint256) {
+        uint256 totalPool = totalWinningBets + totalLosingBets;
+        uint256 platformFee = (totalPool * PLATFORM_FEE) / 100;
+        uint256 winningPool = totalPool - platformFee;
+        return (betAmount * winningPool) / totalWinningBets;
     }
 
     function getCurrentMarket() external view returns (

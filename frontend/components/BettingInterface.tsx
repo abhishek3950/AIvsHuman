@@ -4,7 +4,7 @@ import { useState, useEffect } from "react";
 import { ethers } from "ethers";
 import { useQuery } from "@tanstack/react-query";
 import axios from "axios";
-import { getCurrentMarket, placeBet, MarketData } from "@/utils/contract";
+import { getCurrentMarket, placeBet, MarketData, checkAllowance, approveTokens, getTokenBalance } from "@/utils/contract";
 import { useWallet } from "@/hooks/useWallet";
 
 const COINGECKO_API = "https://api.coingecko.com/api/v3";
@@ -17,6 +17,9 @@ export function BettingInterface() {
   const [isBetting, setIsBetting] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [isApproving, setIsApproving] = useState(false);
+  const [hasAllowance, setHasAllowance] = useState(false);
+  const [tokenBalance, setTokenBalance] = useState<bigint | null>(null);
 
   // Fetch current BTC price
   const { data: btcPrice } = useQuery({
@@ -27,6 +30,22 @@ export function BettingInterface() {
     },
     refetchInterval: 15000, // Refetch every 15 seconds
   });
+
+  // Fetch token balance
+  useEffect(() => {
+    const fetchBalance = async () => {
+      if (!address) return;
+      try {
+        const balance = await getTokenBalance();
+        setTokenBalance(balance);
+      } catch (error) {
+        console.error('Error fetching token balance:', error);
+      }
+    };
+    fetchBalance();
+    const interval = setInterval(fetchBalance, 15000);
+    return () => clearInterval(interval);
+  }, [address]);
 
   // Fetch market data
   useEffect(() => {
@@ -57,13 +76,58 @@ export function BettingInterface() {
     return () => clearInterval(interval);
   }, [address]);
 
+  // Check token allowance when bet amount changes
+  useEffect(() => {
+    const checkTokenAllowance = async () => {
+      if (!betAmount || !address) return;
+      try {
+        const amount = ethers.parseEther(betAmount);
+        const hasAllowance = await checkAllowance(amount);
+        setHasAllowance(hasAllowance);
+      } catch (error) {
+        console.error('Error checking allowance:', error);
+        setHasAllowance(false);
+      }
+    };
+    checkTokenAllowance();
+  }, [betAmount, address]);
+
+  // Handle token approval
+  const handleApprove = async () => {
+    if (!betAmount) return;
+    try {
+      setIsApproving(true);
+      setErrorMessage(null);
+      const amount = ethers.parseEther(betAmount);
+      await approveTokens(amount);
+      setHasAllowance(true);
+    } catch (error) {
+      console.error("Error approving tokens:", error);
+      setErrorMessage(error instanceof Error ? error.message : "Error approving tokens");
+    } finally {
+      setIsApproving(false);
+    }
+  };
+
   // Handle bet placement
   const handleBet = async () => {
     if (!betAmount || isOver === null || !marketData || !address) return;
 
     try {
       setIsBetting(true);
+      setErrorMessage(null);
       const amount = ethers.parseEther(betAmount);
+
+      // Check if we have enough allowance
+      const hasAllowance = await checkAllowance(amount);
+      if (!hasAllowance) {
+        // Approve tokens first
+        setIsApproving(true);
+        await approveTokens(amount);
+        setIsApproving(false);
+      }
+
+      // Place the bet
       await placeBet(marketData.id, isOver, amount);
       setBetAmount("");
       setIsOver(null);
@@ -72,6 +136,13 @@ export function BettingInterface() {
       setErrorMessage(error instanceof Error ? error.message : "Error placing bet");
     } finally {
       setIsBetting(false);
+    }
+  };
+
+  // Handle "All" button click
+  const handleAllClick = () => {
+    if (tokenBalance) {
+      setBetAmount(ethers.formatEther(tokenBalance));
     }
   };
 
@@ -140,9 +211,22 @@ export function BettingInterface() {
       {address && (
         <div className="space-y-4">
           <div>
-            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-              Bet Amount (tokens)
-            </label>
+            <div className="flex justify-between items-center mb-2">
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                Bet Amount (tokens)
+              </label>
+              <div className="flex items-center space-x-2">
+                <span className="text-sm text-gray-500 dark:text-gray-400">
+                  Balance: {tokenBalance ? ethers.formatEther(tokenBalance) : "0"}
+                </span>
+                <button
+                  onClick={handleAllClick}
+                  className="text-sm text-blue-600 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300"
+                >
+                  All
+                </button>
+              </div>
+            </div>
             <input
               type="number"
               value={betAmount}
@@ -178,13 +262,23 @@ export function BettingInterface() {
             </button>
           </div>
 
-          <button
-            onClick={handleBet}
-            disabled={!betAmount || isOver === null || isBetting || isLoading}
-            className="w-full py-2 px-4 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            {isBetting ? "Placing Bet..." : "Place Bet"}
-          </button>
+          {betAmount && !hasAllowance ? (
+            <button
+              onClick={handleApprove}
+              disabled={isApproving || isLoading}
+              className="w-full py-2 px-4 bg-yellow-600 text-white rounded-lg font-medium hover:bg-yellow-700 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {isApproving ? "Approving..." : "Approve Tokens"}
+            </button>
+          ) : (
+            <button
+              onClick={handleBet}
+              disabled={!betAmount || isOver === null || isBetting || isLoading}
+              className="w-full py-2 px-4 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {isBetting ? "Placing Bet..." : "Place Bet"}
+            </button>
+          )}
         </div>
       )}
 

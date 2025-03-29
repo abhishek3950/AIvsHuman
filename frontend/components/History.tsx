@@ -2,120 +2,166 @@
 
 import { useState, useEffect } from "react";
 import { ethers } from "ethers";
-import { getUserBets, claimWinnings, UserBets } from "@/utils/contract";
+import { useWallet } from "@/hooks/useWallet";
+import { getBettingHistory, claimWinnings, calculateWinnings } from "@/utils/contract";
+
+interface Bet {
+  marketId: bigint;
+  isOver: boolean;
+  amount: bigint;
+  claimed: boolean;
+  market: {
+    aiPrediction: bigint;
+    actualPrice: bigint;
+    totalOverBets: bigint;
+    totalUnderBets: bigint;
+    settled: boolean;
+  };
+}
 
 export function History() {
-  const [address, setAddress] = useState<string | null>(null);
-  const [userBets, setUserBets] = useState<UserBets | null>(null);
+  const { address } = useWallet();
+  const [bets, setBets] = useState<Bet[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [isClaiming, setIsClaiming] = useState(false);
 
-  // Connect wallet
   useEffect(() => {
-    const connectWallet = async () => {
-      if (typeof window.ethereum !== 'undefined') {
-        try {
-          const accounts = await window.ethereum.request({ method: 'eth_requestAccounts' });
-          setAddress(accounts[0]);
-        } catch (error) {
-          console.error('Error connecting wallet:', error);
-        }
+    const fetchHistory = async () => {
+      if (!address) {
+        setIsLoading(false);
+        return;
       }
-    };
-    connectWallet();
-  }, []);
-
-  // Fetch user's bets
-  useEffect(() => {
-    const fetchUserBets = async () => {
-      if (!address) return;
 
       try {
-        const data = await getUserBets(BigInt(0), address); // Replace 0 with actual market ID
-        setUserBets(data);
+        setIsLoading(true);
+        setError(null);
+        const history = await getBettingHistory();
+        setBets(history);
       } catch (error) {
-        console.error('Error fetching user bets:', error);
+        console.error("Error fetching betting history:", error);
+        setError(error instanceof Error ? error.message : "Error fetching history");
+      } finally {
+        setIsLoading(false);
       }
     };
 
-    fetchUserBets();
-    const interval = setInterval(fetchUserBets, 15000);
+    fetchHistory();
+    const interval = setInterval(fetchHistory, 15000);
     return () => clearInterval(interval);
   }, [address]);
 
   const handleClaim = async (marketId: bigint) => {
-    if (!address) return;
-
     try {
       setIsClaiming(true);
+      setError(null);
       await claimWinnings(marketId);
-      // Refresh user bets after claiming
-      const data = await getUserBets(marketId, address);
-      setUserBets(data);
+      // Refresh history after claiming
+      const history = await getBettingHistory();
+      setBets(history);
     } catch (error) {
       console.error("Error claiming winnings:", error);
+      setError(error instanceof Error ? error.message : "Error claiming winnings");
     } finally {
       setIsClaiming(false);
     }
   };
 
+  const getWinningsAmount = (bet: Bet) => {
+    if (!bet.market.settled || bet.market.actualPrice === BigInt(0)) return BigInt(0);
+    
+    const isWinningBet = 
+      (bet.isOver && bet.market.actualPrice > bet.market.aiPrediction) ||
+      (!bet.isOver && bet.market.actualPrice < bet.market.aiPrediction);
+    
+    if (!isWinningBet) return BigInt(0);
+    
+    return calculateWinnings(
+      bet.amount,
+      bet.isOver ? bet.market.totalOverBets : bet.market.totalUnderBets,
+      bet.isOver ? bet.market.totalUnderBets : bet.market.totalOverBets
+    );
+  };
+
   if (!address) {
     return (
-      <div className="bg-white dark:bg-gray-800 rounded-lg shadow-lg p-6">
-        <h2 className="text-2xl font-bold text-gray-900 dark:text-white mb-6">
-          Betting History
-        </h2>
-        <div className="text-center py-4">
-          <p className="text-gray-500 dark:text-gray-400">Please connect your wallet to view betting history</p>
-        </div>
+      <div className="text-center text-gray-500 dark:text-gray-400">
+        Please connect your wallet to view betting history
+      </div>
+    );
+  }
+
+  if (isLoading) {
+    return (
+      <div className="text-center text-gray-500 dark:text-gray-400">
+        Loading betting history...
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="text-center text-red-500 dark:text-red-400">
+        {error}
+      </div>
+    );
+  }
+
+  if (bets.length === 0) {
+    return (
+      <div className="text-center text-gray-500 dark:text-gray-400">
+        No betting history found
       </div>
     );
   }
 
   return (
-    <div className="bg-white dark:bg-gray-800 rounded-lg shadow-lg p-6">
-      <h2 className="text-2xl font-bold text-gray-900 dark:text-white mb-6">
-        Betting History
-      </h2>
-
-      <div className="space-y-4">
-        {userBets ? (
-          <div className="bg-gray-50 dark:bg-gray-700 p-4 rounded-lg">
-            <div className="flex justify-between items-center mb-2">
-              <span className="text-sm text-gray-500 dark:text-gray-400">
-                Market ID: 0
-              </span>
-              <span className="text-sm text-gray-500 dark:text-gray-400">
-                {userBets.hasClaimed ? "Claimed" : "Not Claimed"}
-              </span>
+    <div className="space-y-4">
+      {bets.map((bet) => (
+        <div
+          key={bet.marketId.toString()}
+          className="bg-white dark:bg-gray-800 rounded-lg shadow p-4"
+        >
+          <div className="flex justify-between items-start">
+            <div>
+              <p className="text-sm text-gray-500 dark:text-gray-400">
+                Market ID: {bet.marketId.toString()}
+              </p>
+              <p className="text-sm text-gray-500 dark:text-gray-400">
+                Bet: {ethers.formatEther(bet.amount)} tokens on{" "}
+                {bet.isOver ? "Over" : "Under"}
+              </p>
+              <p className="text-sm text-gray-500 dark:text-gray-400">
+                AI Prediction: ${ethers.formatEther(bet.market.aiPrediction)}
+              </p>
+              {bet.market.settled && (
+                <>
+                  <p className="text-sm text-gray-500 dark:text-gray-400">
+                    Actual Price: ${ethers.formatEther(bet.market.actualPrice)}
+                  </p>
+                  <p className="text-sm text-gray-500 dark:text-gray-400">
+                    Total Pool: {ethers.formatEther(bet.market.totalOverBets + bet.market.totalUnderBets)} tokens
+                  </p>
+                </>
+              )}
             </div>
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <p className="text-sm text-gray-500 dark:text-gray-400">Over Bet</p>
-                <p className="text-lg font-semibold text-gray-900 dark:text-white">
-                  {ethers.formatEther(userBets.overBet)}
-                </p>
-              </div>
-              <div>
-                <p className="text-sm text-gray-500 dark:text-gray-400">Under Bet</p>
-                <p className="text-lg font-semibold text-gray-900 dark:text-white">
-                  {ethers.formatEther(userBets.underBet)}
-                </p>
-              </div>
-            </div>
-            {!userBets.hasClaimed && (
+            {bet.market.settled && !bet.claimed && (
               <button
-                onClick={() => handleClaim(BigInt(0))}
+                onClick={() => handleClaim(bet.marketId)}
                 disabled={isClaiming}
-                className="mt-4 w-full py-2 px-4 bg-blue-500 text-white rounded-lg font-semibold hover:bg-blue-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                className="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                {isClaiming ? "Claiming..." : "Claim Winnings"}
+                {isClaiming ? "Claiming..." : `Claim ${ethers.formatEther(getWinningsAmount(bet))} tokens`}
               </button>
             )}
+            {bet.claimed && (
+              <span className="text-green-600 dark:text-green-400">
+                Claimed {ethers.formatEther(getWinningsAmount(bet))} tokens
+              </span>
+            )}
           </div>
-        ) : (
-          <p className="text-gray-500 dark:text-gray-400">No betting history found</p>
-        )}
-      </div>
+        </div>
+      ))}
     </div>
   );
 } 
