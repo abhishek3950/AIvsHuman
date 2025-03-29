@@ -3,6 +3,7 @@
 import { BettingInterface } from "@/components/BettingInterface";
 import { Header } from "@/components/Header";
 import { History } from "@/components/History";
+import { Faucet } from "@/components/Faucet";
 import { useWallet } from "@/hooks/useWallet";
 
 export default function Home() {
@@ -32,7 +33,8 @@ export default function Home() {
             <div className="lg:col-span-2">
               <BettingInterface />
             </div>
-            <div>
+            <div className="space-y-8">
+              <Faucet />
               <History />
             </div>
           </div>

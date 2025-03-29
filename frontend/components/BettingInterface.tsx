@@ -15,6 +15,8 @@ export function BettingInterface() {
   const [isOver, setIsOver] = useState<boolean | null>(null);
   const [marketData, setMarketData] = useState<MarketData | null>(null);
   const [isBetting, setIsBetting] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   // Fetch current BTC price
   const { data: btcPrice } = useQuery({
@@ -29,18 +31,31 @@ export function BettingInterface() {
   // Fetch market data
   useEffect(() => {
     const fetchMarketData = async () => {
+      if (!address) {
+        setIsLoading(false);
+        setErrorMessage("Please connect your wallet first");
+        return;
+      }
+
       try {
+        setIsLoading(true);
+        setErrorMessage(null);
+        console.log("Fetching market data...");
         const data = await getCurrentMarket();
+        console.log("Market data received:", data);
         setMarketData(data);
       } catch (error) {
         console.error('Error fetching market data:', error);
+        setErrorMessage(error instanceof Error ? error.message : "Error fetching market data");
+      } finally {
+        setIsLoading(false);
       }
     };
 
     fetchMarketData();
     const interval = setInterval(fetchMarketData, 15000);
     return () => clearInterval(interval);
-  }, []);
+  }, [address]);
 
   // Handle bet placement
   const handleBet = async () => {
@@ -54,6 +69,7 @@ export function BettingInterface() {
       setIsOver(null);
     } catch (error) {
       console.error("Error placing bet:", error);
+      setErrorMessage(error instanceof Error ? error.message : "Error placing bet");
     } finally {
       setIsBetting(false);
     }
@@ -83,13 +99,13 @@ export function BettingInterface() {
           <div className="bg-gray-50 dark:bg-gray-700 p-4 rounded-lg">
             <p className="text-sm text-gray-500 dark:text-gray-400">Current BTC Price</p>
             <p className="text-xl font-semibold text-gray-900 dark:text-white">
-              ${btcPrice?.toLocaleString()}
+              ${btcPrice?.toLocaleString() ?? "Loading..."}
             </p>
           </div>
           <div className="bg-gray-50 dark:bg-gray-700 p-4 rounded-lg">
             <p className="text-sm text-gray-500 dark:text-gray-400">AI Prediction</p>
             <p className="text-xl font-semibold text-gray-900 dark:text-white">
-              ${marketData ? ethers.formatEther(marketData.aiPrediction) : "Loading..."}
+              {isLoading ? "Loading..." : marketData ? `$${ethers.formatEther(marketData.aiPrediction)}` : "No active market"}
             </p>
           </div>
         </div>
@@ -103,73 +119,79 @@ export function BettingInterface() {
           <div className="bg-gray-50 dark:bg-gray-700 p-4 rounded-lg">
             <p className="text-sm text-gray-500 dark:text-gray-400">Total Over Bets</p>
             <p className="text-xl font-semibold text-gray-900 dark:text-white">
-              {marketData ? ethers.formatEther(marketData.totalOverBets) : "Loading..."}
+              {isLoading ? "Loading..." : marketData ? ethers.formatEther(marketData.totalOverBets) : "0"}
             </p>
           </div>
           <div className="bg-gray-50 dark:bg-gray-700 p-4 rounded-lg">
             <p className="text-sm text-gray-500 dark:text-gray-400">Total Under Bets</p>
             <p className="text-xl font-semibold text-gray-900 dark:text-white">
-              {marketData ? ethers.formatEther(marketData.totalUnderBets) : "Loading..."}
+              {isLoading ? "Loading..." : marketData ? ethers.formatEther(marketData.totalUnderBets) : "0"}
             </p>
           </div>
         </div>
       </div>
 
-      {error ? (
-        <div className="text-center py-4">
-          <p className="text-red-500 dark:text-red-400 mb-4">{error}</p>
+      {errorMessage && (
+        <div className="mb-4 p-4 bg-red-50 dark:bg-red-900/20 rounded-lg">
+          <p className="text-sm text-red-600 dark:text-red-400">{errorMessage}</p>
         </div>
-      ) : !address ? (
-        <div className="text-center py-4">
-          <p className="text-gray-500 dark:text-gray-400 mb-4">
-            {isConnecting ? "Connecting wallet..." : "Please connect your wallet to place bets"}
-          </p>
-        </div>
-      ) : (
+      )}
+
+      {address && (
         <div className="space-y-4">
-          <div className="flex space-x-4">
+          <div>
+            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+              Bet Amount (tokens)
+            </label>
+            <input
+              type="number"
+              value={betAmount}
+              onChange={(e) => setBetAmount(e.target.value)}
+              className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 dark:bg-gray-700 dark:text-white"
+              placeholder="Enter amount"
+              disabled={isLoading}
+            />
+          </div>
+
+          <div className="flex gap-4">
             <button
               onClick={() => setIsOver(true)}
-              className={`flex-1 py-3 px-4 rounded-lg font-semibold ${
-                isOver === true
-                  ? "bg-green-500 text-white"
-                  : "bg-gray-100 dark:bg-gray-700 text-gray-900 dark:text-white"
-              }`}
+              disabled={isLoading || isBetting}
+              className={`flex-1 py-2 px-4 rounded-lg font-medium text-white
+                ${isOver === true
+                  ? 'bg-green-600'
+                  : 'bg-gray-600 hover:bg-gray-700'
+                }`}
             >
               Over
             </button>
             <button
               onClick={() => setIsOver(false)}
-              className={`flex-1 py-3 px-4 rounded-lg font-semibold ${
-                isOver === false
-                  ? "bg-red-500 text-white"
-                  : "bg-gray-100 dark:bg-gray-700 text-gray-900 dark:text-white"
-              }`}
+              disabled={isLoading || isBetting}
+              className={`flex-1 py-2 px-4 rounded-lg font-medium text-white
+                ${isOver === false
+                  ? 'bg-red-600'
+                  : 'bg-gray-600 hover:bg-gray-700'
+                }`}
             >
               Under
             </button>
           </div>
 
-          <div className="flex space-x-4">
-            <input
-              type="number"
-              value={betAmount}
-              onChange={(e) => setBetAmount(e.target.value)}
-              placeholder="Enter bet amount"
-              className="flex-1 py-3 px-4 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
-              min="10"
-              max="100"
-              step="1"
-            />
-            <button
-              onClick={handleBet}
-              disabled={!betAmount || isOver === null || isBetting}
-              className="py-3 px-6 rounded-lg bg-blue-500 text-white font-semibold disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              {isBetting ? "Placing Bet..." : "Place Bet"}
-            </button>
-          </div>
+          <button
+            onClick={handleBet}
+            disabled={!betAmount || isOver === null || isBetting || isLoading}
+            className="w-full py-2 px-4 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            {isBetting ? "Placing Bet..." : "Place Bet"}
+          </button>
         </div>
+      )}
+
+      {!address && (
+        <p className="text-center text-gray-500 dark:text-gray-400">
+          Please connect your wallet to place bets
+        </p>
       )}
     </div>
   );

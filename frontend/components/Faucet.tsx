@@ -24,10 +24,18 @@ export function Faucet() {
 
   useEffect(() => {
     const fetchFaucetData = async () => {
-      if (!address) return;
+      if (!address) {
+        setError('Please connect your wallet first');
+        return;
+      }
 
       try {
         const provider = getProvider();
+        if (!provider) {
+          setError('No ethereum provider found');
+          return;
+        }
+
         const faucetContract = new ethers.Contract(FAUCET_ADDRESS, FAUCET_ABI, provider);
         
         const [cooldownValue, amountValue, lastRequestValue] = await Promise.all([
@@ -39,9 +47,10 @@ export function Faucet() {
         setCooldown(cooldownValue);
         setAmount(amountValue);
         setLastRequest(lastRequestValue);
+        setError(null);
       } catch (err) {
         console.error('Error fetching faucet data:', err);
-        setError('Error fetching faucet data');
+        setError('Error fetching faucet data. Please make sure you are connected to Base Sepolia network.');
       }
     };
 
@@ -49,13 +58,21 @@ export function Faucet() {
   }, [address]);
 
   const handleRequestTokens = async () => {
-    if (!address) return;
+    if (!address) {
+      setError('Please connect your wallet first');
+      return;
+    }
 
     try {
       setIsLoading(true);
       setError(null);
       
       const provider = getProvider();
+      if (!provider) {
+        setError('No ethereum provider found');
+        return;
+      }
+
       const signer = await provider.getSigner();
       const faucetContract = new ethers.Contract(FAUCET_ADDRESS, FAUCET_ABI, signer);
       
@@ -67,7 +84,7 @@ export function Faucet() {
       setLastRequest(lastRequestValue);
     } catch (err) {
       console.error('Error requesting tokens:', err);
-      setError('Error requesting tokens');
+      setError('Error requesting tokens. Please make sure you are connected to Base Sepolia network.');
     } finally {
       setIsLoading(false);
     }
@@ -99,36 +116,36 @@ export function Faucet() {
       <div className="space-y-4">
         <div className="bg-gray-50 dark:bg-gray-700 p-4 rounded-lg">
           <p className="text-sm text-gray-500 dark:text-gray-400">Amount per request</p>
-          <p className="text-xl font-semibold text-gray-900 dark:text-white">
-            {amount ? ethers.formatEther(amount) : "Loading..."} tokens
+          <p className="text-2xl font-bold text-gray-900 dark:text-white">
+            {amount ? `${ethers.formatEther(amount)} tokens` : 'Loading...'}
           </p>
         </div>
 
         {error && (
-          <div className="text-red-500 dark:text-red-400">
-            {error}
+          <div className="bg-red-50 dark:bg-red-900/20 p-4 rounded-lg">
+            <p className="text-sm text-red-600 dark:text-red-400">{error}</p>
           </div>
         )}
 
-        {timeRemaining ? (
-          <div className="text-gray-600 dark:text-gray-300">
-            Next request available in: {timeRemaining}
+        {timeRemaining && (
+          <div className="bg-yellow-50 dark:bg-yellow-900/20 p-4 rounded-lg">
+            <p className="text-sm text-yellow-600 dark:text-yellow-400">
+              Please wait {timeRemaining} before requesting more tokens
+            </p>
           </div>
-        ) : (
-          <button
-            onClick={handleRequestTokens}
-            disabled={isLoading || !address}
-            className="w-full py-3 px-4 bg-blue-500 text-white rounded-lg font-semibold disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            {isLoading ? "Requesting..." : "Request Tokens"}
-          </button>
         )}
 
-        {!address && (
-          <p className="text-gray-500 dark:text-gray-400 text-center">
-            Please connect your wallet to request tokens
-          </p>
-        )}
+        <button
+          onClick={handleRequestTokens}
+          disabled={isLoading || !!timeRemaining || !address}
+          className={`w-full py-2 px-4 rounded-lg font-medium text-white
+            ${isLoading || !!timeRemaining || !address
+              ? 'bg-gray-400 cursor-not-allowed'
+              : 'bg-blue-600 hover:bg-blue-700'
+            }`}
+        >
+          {isLoading ? 'Requesting...' : 'Request Tokens'}
+        </button>
       </div>
     </div>
   );
