@@ -1,35 +1,75 @@
 "use client";
 
-import { useAccount, useContractRead, useContractWrite } from "wagmi";
-import { formatEther } from "viem";
+import { useState, useEffect } from "react";
+import { ethers } from "ethers";
+import { getUserBets, claimWinnings, UserBets } from "@/utils/contract";
 
 export function History() {
-  const { address } = useAccount();
+  const [address, setAddress] = useState<string | null>(null);
+  const [userBets, setUserBets] = useState<UserBets | null>(null);
+  const [isClaiming, setIsClaiming] = useState(false);
 
-  // Read user's past bets
-  const { data: userBets } = useContractRead({
-    address: process.env.NEXT_PUBLIC_CONTRACT_ADDRESS as `0x${string}`,
-    abi: [], // Add contract ABI here
-    functionName: "getUserBets",
-    args: [0, address], // Replace 0 with actual market ID
-  });
+  // Connect wallet
+  useEffect(() => {
+    const connectWallet = async () => {
+      if (typeof window.ethereum !== 'undefined') {
+        try {
+          const accounts = await window.ethereum.request({ method: 'eth_requestAccounts' });
+          setAddress(accounts[0]);
+        } catch (error) {
+          console.error('Error connecting wallet:', error);
+        }
+      }
+    };
+    connectWallet();
+  }, []);
 
-  // Claim winnings function
-  const { write: claimWinnings } = useContractWrite({
-    address: process.env.NEXT_PUBLIC_CONTRACT_ADDRESS as `0x${string}`,
-    abi: [], // Add contract ABI here
-    functionName: "claimWinnings",
-  });
+  // Fetch user's bets
+  useEffect(() => {
+    const fetchUserBets = async () => {
+      if (!address) return;
 
-  const handleClaim = async (marketId: number) => {
+      try {
+        const data = await getUserBets(BigInt(0), address); // Replace 0 with actual market ID
+        setUserBets(data);
+      } catch (error) {
+        console.error('Error fetching user bets:', error);
+      }
+    };
+
+    fetchUserBets();
+    const interval = setInterval(fetchUserBets, 15000);
+    return () => clearInterval(interval);
+  }, [address]);
+
+  const handleClaim = async (marketId: bigint) => {
+    if (!address) return;
+
     try {
-      await claimWinnings({
-        args: [marketId],
-      });
+      setIsClaiming(true);
+      await claimWinnings(marketId);
+      // Refresh user bets after claiming
+      const data = await getUserBets(marketId, address);
+      setUserBets(data);
     } catch (error) {
       console.error("Error claiming winnings:", error);
+    } finally {
+      setIsClaiming(false);
     }
   };
+
+  if (!address) {
+    return (
+      <div className="bg-white dark:bg-gray-800 rounded-lg shadow-lg p-6">
+        <h2 className="text-2xl font-bold text-gray-900 dark:text-white mb-6">
+          Betting History
+        </h2>
+        <div className="text-center py-4">
+          <p className="text-gray-500 dark:text-gray-400">Please connect your wallet to view betting history</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="bg-white dark:bg-gray-800 rounded-lg shadow-lg p-6">
@@ -52,22 +92,23 @@ export function History() {
               <div>
                 <p className="text-sm text-gray-500 dark:text-gray-400">Over Bet</p>
                 <p className="text-lg font-semibold text-gray-900 dark:text-white">
-                  {formatEther(userBets.overBet)}
+                  {ethers.formatEther(userBets.overBet)}
                 </p>
               </div>
               <div>
                 <p className="text-sm text-gray-500 dark:text-gray-400">Under Bet</p>
                 <p className="text-lg font-semibold text-gray-900 dark:text-white">
-                  {formatEther(userBets.underBet)}
+                  {ethers.formatEther(userBets.underBet)}
                 </p>
               </div>
             </div>
             {!userBets.hasClaimed && (
               <button
-                onClick={() => handleClaim(0)}
-                className="mt-4 w-full py-2 px-4 bg-blue-500 text-white rounded-lg font-semibold hover:bg-blue-600 transition-colors"
+                onClick={() => handleClaim(BigInt(0))}
+                disabled={isClaiming}
+                className="mt-4 w-full py-2 px-4 bg-blue-500 text-white rounded-lg font-semibold hover:bg-blue-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                Claim Winnings
+                {isClaiming ? "Claiming..." : "Claim Winnings"}
               </button>
             )}
           </div>

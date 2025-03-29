@@ -1,11 +1,12 @@
 "use client";
 
-import { ConnectButton } from "@rainbow-me/rainbowkit";
 import { useTheme } from "next-themes";
 import { SunIcon, MoonIcon } from "@heroicons/react/24/outline";
+import { useWallet } from "@/hooks/useWallet";
 
 export function Header() {
   const { theme, setTheme } = useTheme();
+  const { address, connectWallet, isConnecting, error } = useWallet();
 
   return (
     <header className="bg-white dark:bg-gray-800 shadow-sm">
@@ -26,7 +27,23 @@ export function Header() {
               )}
             </button>
           </div>
-          <ConnectButton />
+          <div>
+            {error ? (
+              <p className="text-red-500">{error}</p>
+            ) : address ? (
+              <p className="text-gray-900 dark:text-white">
+                {address.slice(0, 6)}...{address.slice(-4)}
+              </p>
+            ) : (
+              <button
+                onClick={connectWallet}
+                disabled={isConnecting}
+                className="px-4 py-2 bg-blue-500 text-white rounded-lg disabled:opacity-50"
+              >
+                {isConnecting ? "Connecting..." : "Connect Wallet"}
+              </button>
+            )}
+          </div>
         </div>
       </div>
     </header>
