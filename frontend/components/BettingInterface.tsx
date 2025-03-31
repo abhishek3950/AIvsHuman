@@ -8,6 +8,48 @@ import { getCurrentMarket, placeBet, MarketData, checkAllowance, approveTokens, 
 import { useWallet } from "@/hooks/useWallet";
 
 const COINGECKO_API = "https://api.coingecko.com/api/v3";
+const LARGE_BET_THRESHOLD = ethers.parseEther("100"); // 100 tokens
+
+interface ConfirmationDialogProps {
+  isOpen: boolean;
+  onClose: () => void;
+  onConfirm: () => void;
+  betAmount: string;
+  isOver: boolean | null;
+  marketData: MarketData | null;
+}
+
+function ConfirmationDialog({ isOpen, onClose, onConfirm, betAmount, isOver, marketData }: ConfirmationDialogProps) {
+  if (!isOpen || !marketData || isOver === null) return null;
+
+  return (
+    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+      <div className="bg-white dark:bg-gray-800 rounded-lg p-6 max-w-md w-full mx-4">
+        <h3 className="text-xl font-bold mb-4 text-gray-900 dark:text-white">Confirm Large Bet</h3>
+        <p className="text-gray-600 dark:text-gray-300 mb-4">
+          You are about to place a large bet of {betAmount} tokens on {isOver ? "Over" : "Under"} the AI prediction of ${ethers.formatEther(marketData.aiPrediction)}.
+        </p>
+        <p className="text-sm text-gray-500 dark:text-gray-400 mb-6">
+          Please review your bet carefully. This action cannot be undone.
+        </p>
+        <div className="flex justify-end space-x-4">
+          <button
+            onClick={onClose}
+            className="px-4 py-2 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 rounded"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={onConfirm}
+            className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700"
+          >
+            Confirm Bet
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 export function BettingInterface() {
   const { address, isConnecting, error } = useWallet();
@@ -20,6 +62,8 @@ export function BettingInterface() {
   const [isApproving, setIsApproving] = useState(false);
   const [hasAllowance, setHasAllowance] = useState(false);
   const [tokenBalance, setTokenBalance] = useState<bigint | null>(null);
+  const [showConfirmation, setShowConfirmation] = useState(false);
+  const [inputError, setInputError] = useState<string | null>(null);
 
   // Fetch current BTC price
   const { data: btcPrice } = useQuery({
@@ -118,22 +162,66 @@ export function BettingInterface() {
     }
   };
 
-  // Handle bet placement
+  // Validate bet amount
+  const validateBetAmount = (amount: string): string | null => {
+    if (!amount) return "Please enter a bet amount";
+    
+    try {
+      const parsedAmount = ethers.parseEther(amount);
+      if (parsedAmount <= BigInt(0)) return "Bet amount must be greater than 0";
+      if (tokenBalance && parsedAmount > tokenBalance) return "Insufficient balance";
+      if (parsedAmount < ethers.parseEther("10")) return "Minimum bet is 10 tokens";
+      if (parsedAmount > ethers.parseEther("100")) return "Maximum bet is 100 tokens";
+      return null;
+    } catch (error) {
+      return "Invalid bet amount";
+    }
+  };
+
+  // Handle bet amount change
+  const handleBetAmountChange = (value: string) => {
+    setBetAmount(value);
+    const error = validateBetAmount(value);
+    setInputError(error);
+  };
+
+  // Handle bet placement with confirmation
   const handleBet = async () => {
     if (!betAmount || isOver === null || !marketData || !address) return;
 
+    const error = validateBetAmount(betAmount);
+    if (error) {
+      setErrorMessage(error);
+      return;
+    }
+
+    const amount = ethers.parseEther(betAmount);
+    if (amount >= LARGE_BET_THRESHOLD) {
+      setShowConfirmation(true);
+      return;
+    }
+
+    await executeBet();
+  };
+
+  // Execute the actual bet
+  const executeBet = async () => {
     try {
       setIsBetting(true);
       setErrorMessage(null);
       const amount = ethers.parseEther(betAmount);
 
-      // Place the bet (approval will be handled inside placeBet if needed)
+      if (!marketData || isOver === null) {
+        throw new Error("Invalid market data or bet direction");
+      }
+
       const betTx = await placeBet(marketData.id, isOver, amount);
       await betTx.wait();
       
       // Reset form
       setBetAmount("");
       setIsOver(null);
+      setInputError(null);
       
       // Refresh balances
       const newBalance = await getTokenBalance();
@@ -141,28 +229,41 @@ export function BettingInterface() {
       
     } catch (error) {
       console.error("Error placing bet:", error);
-      if (error instanceof Error) {
-        if (error.message.includes("User rejected") || error.message.includes("User denied")) {
-          setErrorMessage("Transaction cancelled by user");
-        } else if (error.message.includes("Betting window closed")) {
-          setErrorMessage("Betting window is closed for this market");
-        } else if (error.message.includes("Bet too small")) {
-          setErrorMessage("Bet amount is too small");
-        } else if (error.message.includes("Bet too large")) {
-          setErrorMessage("Bet amount is too large");
-        } else if (error.message.includes("Market bet limit reached")) {
-          setErrorMessage("Market bet limit has been reached");
-        } else if (error.message.includes("insufficient allowance")) {
-          setErrorMessage("Error with token approval. Please try again.");
-        } else {
-          setErrorMessage(error.message);
-        }
-      } else {
-        setErrorMessage("Error placing bet");
-      }
+      handleBetError(error);
     } finally {
       setIsBetting(false);
       setIsApproving(false);
+      setShowConfirmation(false);
+    }
+  };
+
+  // Handle bet errors with detailed messages
+  const handleBetError = (error: any) => {
+    if (error instanceof Error) {
+      const errorMessage = error.message.toLowerCase();
+      if (errorMessage.includes("user rejected") || errorMessage.includes("user denied")) {
+        setErrorMessage("Transaction cancelled by user");
+      } else if (errorMessage.includes("betting window closed")) {
+        setErrorMessage("Betting window is closed for this market");
+      } else if (errorMessage.includes("bet too small")) {
+        setErrorMessage("Bet amount is too small (minimum 10 tokens)");
+      } else if (errorMessage.includes("bet too large")) {
+        setErrorMessage("Bet amount is too large (maximum 100 tokens)");
+      } else if (errorMessage.includes("market bet limit reached")) {
+        setErrorMessage("Market bet limit has been reached");
+      } else if (errorMessage.includes("insufficient allowance")) {
+        setErrorMessage("Error with token approval. Please try approving tokens again.");
+      } else if (errorMessage.includes("insufficient balance")) {
+        setErrorMessage("Insufficient token balance");
+      } else if (errorMessage.includes("nonce too low")) {
+        setErrorMessage("Transaction failed. Please try again.");
+      } else if (errorMessage.includes("network error")) {
+        setErrorMessage("Network error. Please check your connection and try again.");
+      } else {
+        setErrorMessage(`Error placing bet: ${error.message}`);
+      }
+    } else {
+      setErrorMessage("An unexpected error occurred while placing your bet");
     }
   };
 
@@ -248,20 +349,27 @@ export function BettingInterface() {
                 </span>
                 <button
                   onClick={handleAllClick}
-                  className="text-sm text-blue-600 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300"
+                  className="text-sm text-blue-600 hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-300"
                 >
                   All
                 </button>
               </div>
             </div>
-            <input
-              type="number"
-              value={betAmount}
-              onChange={(e) => setBetAmount(e.target.value)}
-              className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 dark:bg-gray-700 dark:text-white"
-              placeholder="Enter amount"
-              disabled={isLoading || isBetting}
-            />
+            <div className="relative">
+              <input
+                type="text"
+                value={betAmount}
+                onChange={(e) => handleBetAmountChange(e.target.value)}
+                className={`w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 ${
+                  inputError ? "border-red-500" : "border-gray-300 dark:border-gray-600"
+                }`}
+                placeholder="Enter bet amount"
+                disabled={isBetting || isApproving}
+              />
+              {inputError && (
+                <p className="mt-1 text-sm text-red-600 dark:text-red-400">{inputError}</p>
+              )}
+            </div>
           </div>
 
           <div className="flex gap-4">
@@ -310,6 +418,15 @@ export function BettingInterface() {
           Please connect your wallet to place bets
         </p>
       )}
+
+      <ConfirmationDialog
+        isOpen={showConfirmation}
+        onClose={() => setShowConfirmation(false)}
+        onConfirm={executeBet}
+        betAmount={betAmount}
+        isOver={isOver}
+        marketData={marketData}
+      />
     </div>
   );
 } 
