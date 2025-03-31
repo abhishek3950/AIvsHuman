@@ -148,7 +148,7 @@ contract BettingContract is Ownable, ReentrancyGuard {
 
         if (winnings > 0) {
             require(token.transfer(msg.sender, winnings), "Transfer failed");
-            market.claimTransactions[msg.sender] = blockhash(block.number - 1);
+            market.claimTransactions[msg.sender] = keccak256(abi.encodePacked(msg.sender, marketId, block.timestamp));
             emit WinningsClaimed(marketId, msg.sender, winnings);
         }
     }

@@ -1,100 +1,84 @@
 import { ethers } from "hardhat";
 import { config } from "dotenv";
 import * as fs from "fs";
+import * as path from "path";
 
 config();
 
 async function main() {
-  // Get environment variables
-  const usdcAddress = ethers.getAddress("0x036cbd53842c5426634e7929541ec2318f3dcf7c"); // Base Sepolia USDC
-  const [deployer] = await ethers.getSigners();
+  const privateKey = process.env.PRIVATE_KEY;
+  if (!privateKey) {
+    throw new Error("PRIVATE_KEY not set in environment variables");
+  }
 
-  console.log("Deploying contracts with account:", deployer.address);
-  console.log("Account balance:", ethers.formatEther(await deployer.provider.getBalance(deployer.address)));
+  console.log("Deploying contracts...");
+
+  // Create wallet with private key
+  const wallet = new ethers.Wallet(privateKey);
+  const provider = new ethers.JsonRpcProvider(process.env.RPC_URL);
+  const signer = wallet.connect(provider);
 
   // Deploy OverOrUnderToken
   console.log("\nDeploying OverOrUnderToken...");
-  const OverOrUnderToken = await ethers.getContractFactory("OverOrUnderToken");
-  const token = await OverOrUnderToken.deploy(
-    usdcAddress,      // USDC address
-    deployer.address, // Treasury (initially set to deployer)
-    deployer.address  // USDC wallet (initially set to deployer)
-  );
-  await token.waitForDeployment();
-  const tokenAddress = await token.getAddress();
-  console.log("OverOrUnderToken deployed to:", tokenAddress);
+  const tokenContract = await ethers.deployContract("OverOrUnderToken");
+  await tokenContract.waitForDeployment();
+  console.log("OverOrUnderToken deployed to:", await tokenContract.getAddress());
 
   // Deploy BettingContract
   console.log("\nDeploying BettingContract...");
-  const BettingContract = await ethers.getContractFactory("BettingContract");
-  const betting = await BettingContract.deploy(
-    tokenAddress,     // Token address
-    deployer.address, // AI agent (initially set to deployer)
-    deployer.address  // Treasury (initially set to deployer)
-  );
-  await betting.waitForDeployment();
-  const bettingAddress = await betting.getAddress();
-  console.log("BettingContract deployed to:", bettingAddress);
+  const bettingContract = await ethers.deployContract("BettingContract", [
+    await tokenContract.getAddress(),
+    process.env.USDC_ADDRESS,
+  ]);
+  await bettingContract.waitForDeployment();
+  console.log("BettingContract deployed to:", await bettingContract.getAddress());
 
   // Deploy Faucet
   console.log("\nDeploying Faucet...");
-  const Faucet = await ethers.getContractFactory("Faucet");
-  const faucet = await Faucet.deploy(tokenAddress);
-  await faucet.waitForDeployment();
-  const faucetAddress = await faucet.getAddress();
-  console.log("Faucet deployed to:", faucetAddress);
+  const faucetContract = await ethers.deployContract("Faucet", [
+    await tokenContract.getAddress(),
+  ]);
+  await faucetContract.waitForDeployment();
+  console.log("Faucet deployed to:", await faucetContract.getAddress());
 
   // Fund contracts with initial tokens
   console.log("\nFunding contracts with initial tokens...");
-  const bettingTokens = ethers.parseEther("1000000"); // 1M tokens for betting
-  const faucetTokens = ethers.parseEther("100000");   // 100K tokens for faucet
-  
-  console.log("Transferring tokens to betting contract...");
-  await token.transfer(bettingAddress, bettingTokens);
-  
-  console.log("Transferring tokens to faucet...");
-  await token.transfer(faucetAddress, faucetTokens);
-  
-  console.log("Initial token transfers completed");
+  const initialSupply = ethers.parseEther("1000000"); // 1M tokens
+  await tokenContract.transfer(await bettingContract.getAddress(), initialSupply);
+  await tokenContract.transfer(await faucetContract.getAddress(), initialSupply);
+  console.log("Contracts funded with initial tokens");
 
-  // Log deployment summary
-  console.log("\nDeployment Summary:");
-  console.log("------------------");
-  console.log("OverOrUnderToken:", tokenAddress);
-  console.log("BettingContract:", bettingAddress);
-  console.log("Faucet:", faucetAddress);
-  console.log("USDC Address:", usdcAddress);
-  console.log("Initial Betting Tokens:", ethers.formatEther(bettingTokens));
-  console.log("Initial Faucet Tokens:", ethers.formatEther(faucetTokens));
-  console.log("\nNote: Treasury, USDC wallet, and AI agent are all set to deployer address:", deployer.address);
-  console.log("You can update these addresses later using the respective setter functions.");
-
-  // Save deployment addresses to a file
+  // Save deployment info
   const deploymentInfo = {
-    token: tokenAddress,
-    betting: bettingAddress,
-    faucet: faucetAddress,
-    usdc: usdcAddress,
-    deployer: deployer.address,
-    timestamp: new Date().toISOString(),
+    tokenContract: await tokenContract.getAddress(),
+    bettingContract: await bettingContract.getAddress(),
+    faucetContract: await faucetContract.getAddress(),
+    deployer: await signer.getAddress(),
   };
 
   fs.writeFileSync(
-    "deployment.json",
+    path.join(__dirname, "../deployment.json"),
     JSON.stringify(deploymentInfo, null, 2)
   );
-  console.log("\nDeployment information saved to deployment.json");
+  console.log("\nDeployment info saved to deployment.json");
 
   // Update .env file
-  const envContent = `PRIVATE_KEY=${process.env.PRIVATE_KEY}
-RPC_URL=${process.env.RPC_URL}
-USDC_ADDRESS=${usdcAddress}
-TOKEN_CONTRACT_ADDRESS=${tokenAddress}
-BETTING_CONTRACT_ADDRESS=${bettingAddress}
-FAUCET_CONTRACT_ADDRESS=${faucetAddress}`;
-
-  fs.writeFileSync(".env", envContent);
-  console.log("\nEnvironment variables updated in .env file");
+  const envPath = path.join(__dirname, "../.env");
+  let envContent = fs.readFileSync(envPath, "utf8");
+  envContent = envContent.replace(
+    /TOKEN_CONTRACT_ADDRESS=.*/,
+    `TOKEN_CONTRACT_ADDRESS=${deploymentInfo.tokenContract}`
+  );
+  envContent = envContent.replace(
+    /BETTING_CONTRACT_ADDRESS=.*/,
+    `BETTING_CONTRACT_ADDRESS=${deploymentInfo.bettingContract}`
+  );
+  envContent = envContent.replace(
+    /FAUCET_CONTRACT_ADDRESS=.*/,
+    `FAUCET_CONTRACT_ADDRESS=${deploymentInfo.faucetContract}`
+  );
+  fs.writeFileSync(envPath, envContent);
+  console.log("Environment variables updated in .env");
 }
 
 main()

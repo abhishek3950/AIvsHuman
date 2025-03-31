@@ -1,23 +1,51 @@
 import { ethers } from "hardhat";
-import { OverOrUnderToken } from "../typechain-types";
+import { config } from "dotenv";
+
+config();
 
 async function main() {
-  const tokenAddress = "0x1f8b71dc3b0650bf4b3701B1DD68ddA4af1eC907";
-  const bettingAddress = "0x12348Bb035e8F259C455006fA7caB9Ea4879e7Fe";
-  const approvalAmount = ethers.parseEther("1000"); // Approve 1000 tokens
-  
+  const tokenAddress = process.env.TOKEN_CONTRACT_ADDRESS;
+  if (!tokenAddress) {
+    throw new Error("TOKEN_CONTRACT_ADDRESS not set in environment variables");
+  }
+
+  const bettingContractAddress = process.env.BETTING_CONTRACT_ADDRESS;
+  if (!bettingContractAddress) {
+    throw new Error("BETTING_CONTRACT_ADDRESS not set in environment variables");
+  }
+
+  const privateKey = process.env.PRIVATE_KEY;
+  if (!privateKey) {
+    throw new Error("PRIVATE_KEY not set in environment variables");
+  }
+
   console.log("Approving tokens...");
-  const Token = await ethers.getContractFactory("OverOrUnderToken");
-  const token = Token.attach(tokenAddress) as OverOrUnderToken;
+  console.log("Token Address:", tokenAddress);
+  console.log("Betting Contract:", bettingContractAddress);
+
+  // Create wallet with private key
+  const wallet = new ethers.Wallet(privateKey);
+  const provider = new ethers.JsonRpcProvider(process.env.RPC_URL);
+  const signer = wallet.connect(provider);
+
+  // Get token contract instance
+  const tokenContract = await ethers.getContractAt("OverOrUnderToken", tokenAddress, signer);
   
-  const tx = await token.approve(bettingAddress, approvalAmount);
-  await tx.wait();
+  // Approve tokens
+  const amount = ethers.parseEther("1000"); // 1000 tokens
+  console.log("\nApproving amount:", ethers.formatEther(amount), "tokens");
   
-  // Check allowance
-  const [signer] = await ethers.getSigners();
-  const allowance = await token.allowance(signer.address, bettingAddress);
-  console.log("\nApproval successful!");
-  console.log("Allowance:", ethers.formatEther(allowance), "tokens");
+  const tx = await tokenContract.approve(bettingContractAddress, amount);
+  console.log("Transaction hash:", tx.hash);
+  
+  // Wait for transaction to be mined
+  console.log("Waiting for transaction to be mined...");
+  const receipt = await tx.wait();
+  console.log("Transaction confirmed in block:", receipt?.blockNumber);
+
+  // Verify allowance
+  const allowance = await tokenContract.allowance(await signer.getAddress(), bettingContractAddress);
+  console.log("\nAllowance:", ethers.formatEther(allowance), "tokens");
 }
 
 main()

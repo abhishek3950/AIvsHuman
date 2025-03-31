@@ -1,29 +1,25 @@
 import { ethers } from "hardhat";
-import { BettingContractV2 } from "../typechain-types";
 
 async function main() {
-  const bettingAddress = process.env.BETTING_CONTRACT_ADDRESS;
-  if (!bettingAddress) {
-    throw new Error("BETTING_CONTRACT_ADDRESS not set");
-  }
+  const bettingContractAddress = "0xc38280B96A8810c127F7320a5bCD142dA4C8B5e6";
 
-  console.log("Checking current market status...");
-  const BettingContract = await ethers.getContractFactory("BettingContractV2");
-  const betting = BettingContract.attach(bettingAddress) as BettingContractV2;
+  console.log("\nChecking current market status...");
 
-  const currentMarket = await betting.getCurrentMarket();
-  const currentTime = Math.floor(Date.now() / 1000);
+  const bettingContract = await ethers.getContractAt("BettingContractV2", bettingContractAddress);
+  const currentMarket = await bettingContract.getCurrentMarket();
+  const now = Math.floor(Date.now() / 1000);
 
   console.log("\nCurrent Market Details:");
   console.log("Market ID:", currentMarket.id.toString());
   console.log("Start Time:", new Date(Number(currentMarket.startTime) * 1000).toLocaleString());
   console.log("End Time:", new Date(Number(currentMarket.endTime) * 1000).toLocaleString());
-  console.log("AI Prediction:", ethers.formatEther(currentMarket.aiPrediction), "ETH");
-  console.log("Total Over Bets:", ethers.formatEther(currentMarket.totalOverBets), "ETH");
-  console.log("Total Under Bets:", ethers.formatEther(currentMarket.totalUnderBets), "ETH");
+  console.log("AI Prediction:", ethers.formatEther(currentMarket.aiPrediction), "USD");
+  console.log("Total Over Bets:", ethers.formatEther(currentMarket.totalOverBets), "OVER tokens");
+  console.log("Total Under Bets:", ethers.formatEther(currentMarket.totalUnderBets), "UNDER tokens");
   console.log("Settled:", currentMarket.settled);
-  console.log("\nCurrent Time:", new Date(currentTime * 1000).toLocaleString());
-  console.log("Market Status:", currentTime > Number(currentMarket.endTime) ? "Ended" : "Active");
+
+  console.log("\nCurrent Time:", new Date(now * 1000).toLocaleString());
+  console.log("Market Status:", now < Number(currentMarket.endTime) ? "Active" : "Ended");
 }
 
 main()
