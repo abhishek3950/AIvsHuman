@@ -1,23 +1,21 @@
 import { ethers } from "hardhat";
 
 async function main() {
-  // Get the contract addresses from environment variables
-  const aiAgentAddress = process.env.AI_AGENT_ADDRESS;
-  const bettingContractAddress = process.env.BETTING_CONTRACT_ADDRESS;
-
-  if (!aiAgentAddress) {
-    throw new Error("AI_AGENT_ADDRESS environment variable not set");
-  }
-  if (!bettingContractAddress) {
-    throw new Error("BETTING_CONTRACT_ADDRESS environment variable not set");
-  }
-
+  const [deployer] = await ethers.getSigners();
   console.log("Updating BettingContract address in AIAgent...");
-  console.log("AIAgent:", aiAgentAddress);
-  console.log("New BettingContract:", bettingContractAddress);
 
-  const aiAgent = await ethers.getContractAt("AIAgent", aiAgentAddress);
-  const tx = await aiAgent.updateBettingContract(bettingContractAddress);
+  const AI_AGENT_ADDRESS = process.env.AI_AGENT_ADDRESS;
+  const BETTING_CONTRACT_ADDRESS = process.env.BETTING_CONTRACT_ADDRESS;
+
+  if (!AI_AGENT_ADDRESS || !BETTING_CONTRACT_ADDRESS) {
+    throw new Error("Required environment variables not set");
+  }
+
+  console.log("AIAgent:", AI_AGENT_ADDRESS);
+  console.log("New BettingContract:", BETTING_CONTRACT_ADDRESS);
+
+  const aiAgent = await ethers.getContractAt("AIAgent", AI_AGENT_ADDRESS);
+  const tx = await aiAgent.updateBettingContract(BETTING_CONTRACT_ADDRESS);
   await tx.wait();
 
   console.log("BettingContract address updated successfully!");

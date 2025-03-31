@@ -99,11 +99,20 @@ export function BettingInterface() {
       setIsApproving(true);
       setErrorMessage(null);
       const amount = ethers.parseEther(betAmount);
-      await approveTokens(amount);
+      const tx = await approveTokens(amount);
+      await tx.wait();
       setHasAllowance(true);
     } catch (error) {
       console.error("Error approving tokens:", error);
-      setErrorMessage(error instanceof Error ? error.message : "Error approving tokens");
+      if (error instanceof Error) {
+        if (error.message.includes("User rejected") || error.message.includes("User denied")) {
+          setErrorMessage("Transaction cancelled by user");
+        } else {
+          setErrorMessage(error.message);
+        }
+      } else {
+        setErrorMessage("Error approving tokens");
+      }
     } finally {
       setIsApproving(false);
     }
@@ -118,24 +127,42 @@ export function BettingInterface() {
       setErrorMessage(null);
       const amount = ethers.parseEther(betAmount);
 
-      // Check if we have enough allowance
-      const hasAllowance = await checkAllowance(amount);
-      if (!hasAllowance) {
-        // Approve tokens first
-        setIsApproving(true);
-        await approveTokens(amount);
-        setIsApproving(false);
-      }
-
-      // Place the bet
-      await placeBet(marketData.id, isOver, amount);
+      // Place the bet (approval will be handled inside placeBet if needed)
+      const betTx = await placeBet(marketData.id, isOver, amount);
+      await betTx.wait();
+      
+      // Reset form
       setBetAmount("");
       setIsOver(null);
+      
+      // Refresh balances
+      const newBalance = await getTokenBalance();
+      setTokenBalance(newBalance);
+      
     } catch (error) {
       console.error("Error placing bet:", error);
-      setErrorMessage(error instanceof Error ? error.message : "Error placing bet");
+      if (error instanceof Error) {
+        if (error.message.includes("User rejected") || error.message.includes("User denied")) {
+          setErrorMessage("Transaction cancelled by user");
+        } else if (error.message.includes("Betting window closed")) {
+          setErrorMessage("Betting window is closed for this market");
+        } else if (error.message.includes("Bet too small")) {
+          setErrorMessage("Bet amount is too small");
+        } else if (error.message.includes("Bet too large")) {
+          setErrorMessage("Bet amount is too large");
+        } else if (error.message.includes("Market bet limit reached")) {
+          setErrorMessage("Market bet limit has been reached");
+        } else if (error.message.includes("insufficient allowance")) {
+          setErrorMessage("Error with token approval. Please try again.");
+        } else {
+          setErrorMessage(error.message);
+        }
+      } else {
+        setErrorMessage("Error placing bet");
+      }
     } finally {
       setIsBetting(false);
+      setIsApproving(false);
     }
   };
 
@@ -233,7 +260,7 @@ export function BettingInterface() {
               onChange={(e) => setBetAmount(e.target.value)}
               className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 dark:bg-gray-700 dark:text-white"
               placeholder="Enter amount"
-              disabled={isLoading}
+              disabled={isLoading || isBetting}
             />
           </div>
 
@@ -262,22 +289,18 @@ export function BettingInterface() {
             </button>
           </div>
 
-          {betAmount && !hasAllowance ? (
-            <button
-              onClick={handleApprove}
-              disabled={isApproving || isLoading}
-              className="w-full py-2 px-4 bg-yellow-600 text-white rounded-lg font-medium hover:bg-yellow-700 disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              {isApproving ? "Approving..." : "Approve Tokens"}
-            </button>
-          ) : (
-            <button
-              onClick={handleBet}
-              disabled={!betAmount || isOver === null || isBetting || isLoading}
-              className="w-full py-2 px-4 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              {isBetting ? "Placing Bet..." : "Place Bet"}
-            </button>
+          <button
+            onClick={handleBet}
+            disabled={!betAmount || isOver === null || isBetting || isLoading}
+            className="w-full py-2 px-4 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            {isBetting ? (isApproving ? "Approving..." : "Placing Bet...") : "Place Bet"}
+          </button>
+
+          {errorMessage && (
+            <div className="text-red-500 dark:text-red-400 text-sm mt-2">
+              {errorMessage}
+            </div>
           )}
         </div>
       )}

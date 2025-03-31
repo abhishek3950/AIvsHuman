@@ -3,7 +3,7 @@ import { OverOrUnderToken } from "../typechain-types";
 
 async function main() {
   const tokenAddress = "0x1f8b71dc3b0650bf4b3701B1DD68ddA4af1eC907";
-  const bettingAddress = "0xFFF42F5cC652E9c8AcabE8Afb94e7B547a7D729B";
+  const bettingAddress = "0x12348Bb035e8F259C455006fA7caB9Ea4879e7Fe";
   const approvalAmount = ethers.parseEther("1000"); // Approve 1000 tokens
   
   console.log("Approving tokens...");

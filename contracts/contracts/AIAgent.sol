@@ -13,10 +13,17 @@ contract AIAgent is Ownable {
 
     event PredictionMade(uint256 timestamp, uint256 currentPrice, uint256 prediction);
     event MarketSettled(uint256 marketId, uint256 timestamp, uint256 actualPrice);
+    event BettingContractUpdated(address indexed newBettingContract);
 
     constructor(address _bettingContract) {
         bettingContract = BettingContract(_bettingContract);
         lastUpdateTime = block.timestamp;
+    }
+
+    function updateBettingContract(address _newBettingContract) external onlyOwner {
+        require(_newBettingContract != address(0), "Invalid betting contract address");
+        bettingContract = BettingContract(_newBettingContract);
+        emit BettingContractUpdated(_newBettingContract);
     }
 
     function makePrediction() external onlyOwner {

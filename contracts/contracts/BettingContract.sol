@@ -20,6 +20,7 @@ contract BettingContract is Ownable, ReentrancyGuard {
         mapping(address => uint256) overBets;
         mapping(address => uint256) underBets;
         mapping(address => bool) hasClaimed;
+        mapping(address => bytes32) claimTransactions;
     }
 
     uint256 public constant MARKET_DURATION = 5 minutes;
@@ -147,6 +148,7 @@ contract BettingContract is Ownable, ReentrancyGuard {
 
         if (winnings > 0) {
             require(token.transfer(msg.sender, winnings), "Transfer failed");
+            market.claimTransactions[msg.sender] = blockhash(block.number - 1);
             emit WinningsClaimed(marketId, msg.sender, winnings);
         }
     }
@@ -198,5 +200,38 @@ contract BettingContract is Ownable, ReentrancyGuard {
             market.underBets[user],
             market.hasClaimed[user]
         );
+    }
+
+    function getMarket(uint256 marketId) external view returns (
+        uint256 id,
+        uint256 startTime,
+        uint256 endTime,
+        uint256 aiPrediction,
+        uint256 actualPrice,
+        uint256 totalOverBets,
+        uint256 totalUnderBets,
+        bool settled
+    ) {
+        require(marketId < markets.length, "Invalid market");
+        Market storage market = markets[marketId];
+        return (
+            market.id,
+            market.startTime,
+            market.endTime,
+            market.aiPrediction,
+            market.actualPrice,
+            market.totalOverBets,
+            market.totalUnderBets,
+            market.settled
+        );
+    }
+
+    function getClaimTransaction(uint256 marketId, address user) external view returns (bytes32) {
+        require(marketId < markets.length, "Invalid market");
+        return markets[marketId].claimTransactions[user];
+    }
+
+    function getMarketsCount() external view returns (uint256) {
+        return markets.length;
     }
 } 
