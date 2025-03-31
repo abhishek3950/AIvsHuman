@@ -51,6 +51,67 @@ export const BETTING_CONTRACT_ABI = [
     stateMutability: "view",
     type: "function",
   },
+  {
+    inputs: [],
+    name: "getMarketsCount",
+    outputs: [{ name: "", type: "uint256" }],
+    stateMutability: "view",
+    type: "function",
+  },
+  {
+    inputs: [{ name: "marketId", type: "uint256" }],
+    name: "getMarket",
+    outputs: [
+      { name: "id", type: "uint256" },
+      { name: "startTime", type: "uint256" },
+      { name: "endTime", type: "uint256" },
+      { name: "aiPrediction", type: "uint256" },
+      { name: "actualPrice", type: "uint256" },
+      { name: "totalOverBets", type: "uint256" },
+      { name: "totalUnderBets", type: "uint256" },
+      { name: "settled", type: "bool" },
+    ],
+    stateMutability: "view",
+    type: "function",
+  },
+  {
+    inputs: [
+      { name: "marketId", type: "uint256" },
+      { name: "user", type: "address" },
+    ],
+    name: "getClaimTransaction",
+    outputs: [{ name: "", type: "bytes32" }],
+    stateMutability: "view",
+    type: "function",
+  },
+  {
+    inputs: [],
+    name: "owner",
+    outputs: [{ name: "", type: "address" }],
+    stateMutability: "view",
+    type: "function",
+  },
+  {
+    inputs: [],
+    name: "aiAgent",
+    outputs: [{ name: "", type: "address" }],
+    stateMutability: "view",
+    type: "function",
+  },
+  {
+    inputs: [],
+    name: "treasury",
+    outputs: [{ name: "", type: "address" }],
+    stateMutability: "view",
+    type: "function",
+  },
+  {
+    inputs: [],
+    name: "token",
+    outputs: [{ name: "", type: "address" }],
+    stateMutability: "view",
+    type: "function",
+  },
 ];
 
 export const TOKEN_CONTRACT_ABI = [

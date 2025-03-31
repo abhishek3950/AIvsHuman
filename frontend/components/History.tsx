@@ -20,6 +20,8 @@ interface Bet {
   claimTxHash?: string;
 }
 
+type Tab = "claimable" | "history";
+
 export function History() {
   const { address } = useWallet();
   const [bets, setBets] = useState<Bet[]>([]);
@@ -29,6 +31,7 @@ export function History() {
   const [claimingMarketId, setClaimingMarketId] = useState<bigint | null>(null);
   const [currentPage, setCurrentPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
+  const [activeTab, setActiveTab] = useState<Tab>("history");
   const betsPerPage = 5;
 
   useEffect(() => {
@@ -43,7 +46,7 @@ export function History() {
       }
 
       try {
-        if (isMounted) {
+        if (bets.length === 0 && isMounted) {
           setIsLoading(true);
           setError(null);
         }
@@ -65,7 +68,7 @@ export function History() {
     };
 
     fetchHistory();
-    const interval = setInterval(fetchHistory, 15000);
+    const interval = setInterval(fetchHistory, 30000);
 
     return () => {
       isMounted = false;
@@ -93,16 +96,31 @@ export function History() {
     }
   };
 
-  // Get paginated bets
-  const getPaginatedBets = () => {
-    const startIndex = (currentPage - 1) * betsPerPage;
-    const endIndex = startIndex + betsPerPage;
-    return bets.slice(startIndex, endIndex);
+  const getWinningsAmount = (bet: Bet) => {
+    if (!bet.market.settled || bet.market.actualPrice === BigInt(0)) return BigInt(0);
+    
+    const isCorrect = bet.isOver ? bet.market.actualPrice > bet.market.aiPrediction : bet.market.actualPrice < bet.market.aiPrediction;
+    if (!isCorrect) return BigInt(0);
+
+    const totalWinningBets = bet.isOver ? bet.market.totalOverBets : bet.market.totalUnderBets;
+    const totalLosingBets = bet.isOver ? bet.market.totalUnderBets : bet.market.totalOverBets;
+
+    if (totalWinningBets === BigInt(0)) return BigInt(0);
+
+    return calculateWinnings(bet.amount, totalWinningBets, totalLosingBets);
   };
 
-  // Handle page change
-  const handlePageChange = (page: number) => {
-    setCurrentPage(page);
+  const getBetStatus = (bet: Bet) => {
+    if (!bet.market.settled) return "Pending";
+    
+    const winnings = getWinningsAmount(bet);
+    if (winnings === BigInt(0)) return "Lost";
+    
+    // If it's a winning bet and has been claimed, show "Claimed"
+    if (bet.claimed) return "Claimed";
+    
+    // If it's a winning bet and hasn't been claimed, show "Won"
+    return "Won";
   };
 
   const handleClaim = async (marketId: bigint) => {
@@ -135,27 +153,31 @@ export function History() {
     }
   };
 
-  const getWinningsAmount = (bet: Bet) => {
-    if (!bet.market.settled || bet.market.actualPrice === BigInt(0)) return BigInt(0);
-    
-    const isCorrect = bet.isOver ? bet.market.actualPrice > bet.market.aiPrediction : bet.market.actualPrice < bet.market.aiPrediction;
-    if (!isCorrect) return BigInt(0);
-
-    const totalWinningBets = bet.isOver ? bet.market.totalOverBets : bet.market.totalUnderBets;
-    const totalLosingBets = bet.isOver ? bet.market.totalUnderBets : bet.market.totalOverBets;
-
-    if (totalWinningBets === BigInt(0)) return BigInt(0);
-
-    return calculateWinnings(bet.amount, totalWinningBets, totalLosingBets);
+  const getFilteredBets = () => {
+    if (activeTab === "claimable") {
+      // Show only winning bets that haven't been claimed
+      return bets.filter(bet => {
+        // Check if market is settled
+        if (!bet.market.settled) return false;
+        
+        // Check if bet was won
+        const isWon = bet.isOver 
+          ? bet.market.actualPrice > bet.market.aiPrediction
+          : bet.market.actualPrice < bet.market.aiPrediction;
+        
+        // Return true if bet was won and hasn't been claimed
+        return isWon && !bet.claimed;
+      });
+    }
+    // Sort by market ID in descending order (newest first)
+    return [...bets].sort((a, b) => Number(b.marketId - a.marketId));
   };
 
-  const getBetStatus = (bet: Bet) => {
-    if (!bet.market.settled) return "Pending";
-    if (bet.claimed) return "Claimed";
-    
-    const winnings = getWinningsAmount(bet);
-    if (winnings === BigInt(0)) return "Lost";
-    return "Won";
+  const getPaginatedBets = () => {
+    const filteredBets = getFilteredBets();
+    const startIndex = (currentPage - 1) * betsPerPage;
+    const endIndex = startIndex + betsPerPage;
+    return filteredBets.slice(startIndex, endIndex);
   };
 
   if (!address) {
@@ -166,7 +188,7 @@ export function History() {
     );
   }
 
-  if (isLoading) {
+  if (isLoading && bets.length === 0) {
     return (
       <div className="text-center py-8">
         <p className="text-gray-600">Loading betting history...</p>
@@ -182,45 +204,103 @@ export function History() {
     );
   }
 
-  if (bets.length === 0) {
+  const filteredBets = getFilteredBets();
+  if (filteredBets.length === 0) {
     return (
-      <div className="text-center py-8">
-        <p className="text-gray-600">No betting history found</p>
+      <div>
+        {/* Tabs */}
+        <div className="flex space-x-4 mb-4">
+          <button
+            key="claimable-tab"
+            onClick={() => setActiveTab("claimable")}
+            className={`px-4 py-2 rounded ${
+              activeTab === "claimable"
+                ? "bg-blue-600 text-white"
+                : "bg-gray-200 text-gray-700 hover:bg-gray-300"
+            }`}
+          >
+            Claimable Winnings
+          </button>
+          <button
+            key="history-tab"
+            onClick={() => setActiveTab("history")}
+            className={`px-4 py-2 rounded ${
+              activeTab === "history"
+                ? "bg-blue-600 text-white"
+                : "bg-gray-200 text-gray-700 hover:bg-gray-300"
+            }`}
+          >
+            Betting History
+          </button>
+        </div>
+
+        <div className="text-center py-8">
+          <p className="text-gray-600">
+            {activeTab === "claimable" 
+              ? "No claimable winnings found. Check your betting history to see past bets and claims." 
+              : "No betting history found. Place a bet to get started!"}
+          </p>
+        </div>
       </div>
     );
   }
 
   return (
     <div className="space-y-4">
+      {/* Tabs */}
+      <div className="flex space-x-4 mb-4">
+        <button
+          key="claimable-tab"
+          onClick={() => setActiveTab("claimable")}
+          className={`px-4 py-2 rounded ${
+            activeTab === "claimable"
+              ? "bg-blue-600 text-white"
+              : "bg-gray-200 text-gray-700 hover:bg-gray-300"
+          }`}
+        >
+          Claimable Winnings
+        </button>
+        <button
+          key="history-tab"
+          onClick={() => setActiveTab("history")}
+          className={`px-4 py-2 rounded ${
+            activeTab === "history"
+              ? "bg-blue-600 text-white"
+              : "bg-gray-200 text-gray-700 hover:bg-gray-300"
+          }`}
+        >
+          Betting History
+        </button>
+      </div>
+
+      {/* Bet List */}
       {getPaginatedBets().map((bet) => {
         const status = getBetStatus(bet);
         const winnings = getWinningsAmount(bet);
-        const isClaimable = status === "Won" && !bet.claimed;
         const isClaiming = claimingMarketId === bet.marketId;
 
+        // Check if bet was won
+        const isWon = bet.market.settled && (
+          bet.isOver 
+            ? bet.market.actualPrice > bet.market.aiPrediction
+            : bet.market.actualPrice < bet.market.aiPrediction
+        );
+
         return (
-          <div key={bet.marketId.toString()} className="bg-white rounded-lg shadow p-4">
+          <div key={`${bet.marketId}-${bet.isOver ? 'over' : 'under'}`} className="bg-white dark:bg-gray-800 rounded-lg shadow p-4">
             <div className="flex justify-between items-start">
               <div>
                 <h3 className="font-semibold">Market #{bet.marketId.toString()}</h3>
-                <p className="text-sm text-gray-600">
+                <p className="text-sm text-gray-600 dark:text-gray-300">
                   Bet: {ethers.formatEther(bet.amount)} tokens on {bet.isOver ? "Over" : "Under"}
                 </p>
-                <p className="text-sm text-gray-600">
-                  AI Prediction: {ethers.formatEther(bet.market.aiPrediction)}
+                <p className="text-sm text-gray-600 dark:text-gray-300">
+                  AI Prediction: ${ethers.formatEther(bet.market.aiPrediction)}
                 </p>
-                <p className="text-sm text-gray-600">
-                  Actual Price: {ethers.formatEther(bet.market.actualPrice)}
-                </p>
-                {bet.claimTxHash && (
-                  <a
-                    href={getBlockExplorerUrl(bet.claimTxHash)}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="text-sm text-blue-600 hover:underline"
-                  >
-                    View Claim Transaction
-                  </a>
+                {bet.market.settled && (
+                  <p className="text-sm text-gray-600 dark:text-gray-300">
+                    Actual Price: ${ethers.formatEther(bet.market.actualPrice)}
+                  </p>
                 )}
               </div>
               <div className="text-right">
@@ -232,18 +312,33 @@ export function History() {
                 }`}>
                   {status}
                 </span>
-                {isClaimable && (
-                  <button
-                    onClick={() => handleClaim(bet.marketId)}
-                    disabled={isClaiming}
-                    className={`mt-2 px-4 py-2 rounded text-sm ${
-                      isClaiming
-                        ? "bg-gray-300 cursor-not-allowed"
-                        : "bg-blue-600 hover:bg-blue-700 text-white"
-                    }`}
-                  >
-                    {isClaiming ? "Claiming..." : `Claim ${ethers.formatEther(winnings)} tokens`}
-                  </button>
+                {activeTab === "claimable" ? (
+                  // Show claim button for winning bets that haven't been claimed
+                  isWon && !bet.claimed && (
+                    <button
+                      onClick={() => handleClaim(bet.marketId)}
+                      disabled={isClaiming}
+                      className={`mt-2 px-3 py-1 text-sm rounded ${
+                        isClaiming
+                          ? 'bg-gray-300 cursor-not-allowed'
+                          : 'bg-blue-500 hover:bg-blue-600 text-white'
+                      }`}
+                    >
+                      {isClaiming ? "Claiming..." : `Claim ${ethers.formatEther(winnings)} tokens`}
+                    </button>
+                  )
+                ) : (
+                  // Show transaction link for claimed bets in history tab
+                  bet.claimTxHash && (
+                    <a
+                      href={getBlockExplorerUrl(bet.claimTxHash)}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="mt-2 block text-sm text-blue-500 hover:text-blue-700"
+                    >
+                      View Transaction
+                    </a>
+                  )
                 )}
               </div>
             </div>
@@ -252,30 +347,22 @@ export function History() {
       })}
 
       {/* Pagination Controls */}
-      {bets.length > betsPerPage && (
-        <div className="flex justify-center items-center space-x-2 mt-6">
+      {filteredBets.length > betsPerPage && (
+        <div className="flex justify-center space-x-2 mt-4">
           <button
-            onClick={() => handlePageChange(currentPage - 1)}
+            onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
             disabled={currentPage === 1}
-            className={`px-3 py-1 rounded ${
-              currentPage === 1
-                ? "bg-gray-200 text-gray-500 cursor-not-allowed"
-                : "bg-blue-600 text-white hover:bg-blue-700"
-            }`}
+            className="px-3 py-1 rounded bg-gray-200 disabled:opacity-50"
           >
             Previous
           </button>
-          <span className="text-gray-600">
+          <span className="px-3 py-1">
             Page {currentPage} of {totalPages}
           </span>
           <button
-            onClick={() => handlePageChange(currentPage + 1)}
+            onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
             disabled={currentPage === totalPages}
-            className={`px-3 py-1 rounded ${
-              currentPage === totalPages
-                ? "bg-gray-200 text-gray-500 cursor-not-allowed"
-                : "bg-blue-600 text-white hover:bg-blue-700"
-            }`}
+            className="px-3 py-1 rounded bg-gray-200 disabled:opacity-50"
           >
             Next
           </button>

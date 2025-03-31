@@ -4,21 +4,21 @@ import { BETTING_CONTRACT_ABI, TOKEN_CONTRACT_ABI } from '@/contracts/abi';
 // Log all environment variables
 console.log('Environment variables:', {
   NEXT_PUBLIC_BETTING_CONTRACT_ADDRESS: process.env.NEXT_PUBLIC_BETTING_CONTRACT_ADDRESS,
-  NEXT_PUBLIC_TOKEN_CONTRACT_ADDRESS: process.env.NEXT_PUBLIC_TOKEN_CONTRACT_ADDRESS,
+  NEXT_PUBLIC_TOKEN_ADDRESS: process.env.NEXT_PUBLIC_TOKEN_ADDRESS,
   NEXT_PUBLIC_AI_AGENT_ADDRESS: process.env.NEXT_PUBLIC_AI_AGENT_ADDRESS,
   NEXT_PUBLIC_FAUCET_CONTRACT_ADDRESS: process.env.NEXT_PUBLIC_FAUCET_CONTRACT_ADDRESS,
   NEXT_PUBLIC_USDC_ADDRESS: process.env.NEXT_PUBLIC_USDC_ADDRESS
 });
 
 const CONTRACT_ADDRESS = process.env.NEXT_PUBLIC_BETTING_CONTRACT_ADDRESS as string;
-const TOKEN_ADDRESS = process.env.NEXT_PUBLIC_TOKEN_CONTRACT_ADDRESS as string;
+const TOKEN_ADDRESS = process.env.NEXT_PUBLIC_TOKEN_ADDRESS as string;
 
 if (!CONTRACT_ADDRESS) {
   throw new Error('NEXT_PUBLIC_BETTING_CONTRACT_ADDRESS environment variable not set');
 }
 
 if (!TOKEN_ADDRESS) {
-  throw new Error('NEXT_PUBLIC_TOKEN_CONTRACT_ADDRESS environment variable not set');
+  throw new Error('NEXT_PUBLIC_TOKEN_ADDRESS environment variable not set');
 }
 
 console.log('Contract addresses:', {
@@ -102,7 +102,7 @@ export const getContract = async (withSigner = false) => {
       CONTRACT_ADDRESS,
       BETTING_CONTRACT_ABI,
       provider
-    ) as unknown as ethers.Contract & {
+    ) as ethers.Contract & {
       getCurrentMarket(): Promise<MarketData>;
       getUserBets(marketId: bigint, userAddress: string): Promise<UserBets>;
       placeBet(marketId: bigint, isOver: boolean, amount: bigint): Promise<ethers.ContractTransactionResponse>;
@@ -110,6 +110,10 @@ export const getContract = async (withSigner = false) => {
       getMarket(marketId: bigint): Promise<MarketData>;
       getClaimTransaction(marketId: bigint, userAddress: string): Promise<string>;
       getMarketsCount(): Promise<bigint>;
+      owner(): Promise<string>;
+      aiAgent(): Promise<string>;
+      treasury(): Promise<string>;
+      token(): Promise<string>;
     };
 
     if (withSigner) {
@@ -270,7 +274,37 @@ export const placeBet = async (marketId: bigint, isOver: boolean, amount: bigint
 export const claimWinnings = async (marketId: bigint) => {
   try {
     const contract = await getContract(true);
+    const signer = await getProvider().getSigner();
+    const address = await signer.getAddress();
+
+    console.log('Claiming winnings for market:', marketId.toString());
+    console.log('User address:', address);
+
+    // Get market data first to verify it's claimable
+    const market = await contract.getMarket(marketId);
+    console.log('Market data:', market);
+
+    // Get user's bets for this market
+    const userBets = await contract.getUserBets(marketId, address);
+    console.log('User bets:', userBets);
+
+    // Check if bet was won
+    const isOverBetWon = market.settled && market.actualPrice > market.aiPrediction;
+    const isUnderBetWon = market.settled && market.actualPrice < market.aiPrediction;
+    
+    console.log('Is over bet won:', isOverBetWon);
+    console.log('Is under bet won:', isUnderBetWon);
+
+    // Check if already claimed
+    if (userBets.hasClaimed) {
+      throw new Error('Already claimed');
+    }
+
+    // Claim winnings
     const tx = await contract.claimWinnings(marketId);
+    console.log('Claim transaction sent:', tx.hash);
+    await tx.wait();
+    console.log('Claim transaction confirmed');
     return tx;
   } catch (error) {
     console.error('Error claiming winnings:', error);
@@ -284,61 +318,67 @@ export async function getBettingHistory(): Promise<Bet[]> {
     const signer = await getProvider().getSigner();
     const address = await signer.getAddress();
     console.log('Getting betting history for address:', address);
+    console.log('Contract address:', CONTRACT_ADDRESS);
 
-    // Get current market to determine the latest market ID
+    // Get current market to know the latest market ID
     const currentMarket = await contract.getCurrentMarket();
-    console.log('Current market:', currentMarket);
+    console.log('\nCurrent market:', currentMarket);
     
-    // If there are no markets yet, return empty array
-    if (currentMarket.id === BigInt(0) && currentMarket.startTime === BigInt(0)) {
-      console.log('No markets found');
+    if (!currentMarket || currentMarket.id === undefined) {
+      console.log('No valid current market found');
       return [];
     }
 
+    const currentMarketId = currentMarket.id;
+    console.log('Current market ID:', currentMarketId.toString());
+    
     const bets: Bet[] = [];
-    let marketId = currentMarket.id;
-    let consecutiveErrors = 0;
-    const MAX_CONSECUTIVE_ERRORS = 5; // Stop after 5 consecutive errors
-
-    // Keep trying markets until we hit too many consecutive errors
-    while (consecutiveErrors < MAX_CONSECUTIVE_ERRORS && marketId >= BigInt(0)) {
+    
+    // Check all markets from 0 to current market ID
+    for (let marketId = BigInt(0); marketId <= currentMarketId; marketId += BigInt(1)) {
       try {
-        console.log(`Trying market ${marketId.toString()}`);
+        console.log(`\nChecking market ${marketId.toString()}`);
         
-        // Get user's bets for this market first
+        // Get user's bets for this market
         const userBets = await contract.getUserBets(marketId, address);
-        console.log(`User bets for market ${marketId.toString()}:`, userBets);
+        console.log(`User bets for market ${marketId.toString()}:`, {
+          overBet: userBets.overBet.toString(),
+          underBet: userBets.underBet.toString(),
+          hasClaimed: userBets.hasClaimed
+        });
         
-        // Only try to get market data if user has bets
+        // Only process if user has bets in this market
         if (userBets.overBet > BigInt(0) || userBets.underBet > BigInt(0)) {
-          // Try to get market data, fall back to current market if it fails
-          let market: MarketData;
-          try {
-            market = await contract.getMarket(marketId);
-            console.log(`Market ${marketId.toString()} data:`, market);
-          } catch (error) {
-            console.log(`Failed to get market ${marketId} data, using current market data`);
-            market = currentMarket;
-          }
+          // Get market data
+          const market = await contract.getMarket(marketId);
+          console.log(`Market ${marketId.toString()} data:`, market);
           
-          // Try to get claim transaction hash, but don't fail if it's not available
-          let claimTxHash: string | undefined;
-          try {
-            claimTxHash = await contract.getClaimTransaction(marketId, address);
-            console.log(`Claim transaction hash for market ${marketId.toString()}:`, claimTxHash);
-            // If the hash is all zeros or empty, treat it as undefined
-            if (!claimTxHash || claimTxHash === "0x0000000000000000000000000000000000000000000000000000000000000000") {
-              claimTxHash = undefined;
-            }
-          } catch (error) {
-            // Log but don't fail if getClaimTransaction is not available
-            console.log(`getClaimTransaction not available for market ${marketId}:`, error);
-            claimTxHash = undefined;
-          }
-
           // Add over bet if exists
           if (userBets.overBet > BigInt(0)) {
-            console.log(`Adding over bet for market ${marketId.toString()}`);
+            // Check if over bet was won
+            const isOverBetWon = market.settled && market.actualPrice > market.aiPrediction;
+            
+            // Only check claim transaction if bet was won
+            let claimTxHash: string | undefined;
+            if (isOverBetWon && userBets.hasClaimed) {
+              try {
+                // Get the actual transaction hash from the claim transaction
+                const provider = getProvider();
+                const blockNumber = await provider.getBlockNumber();
+                const events = await contract.queryFilter(
+                  contract.filters.Claimed(marketId, address),
+                  blockNumber - 10000, // Look back 10000 blocks
+                  blockNumber
+                );
+                
+                if (events.length > 0) {
+                  claimTxHash = events[0].transactionHash;
+                }
+              } catch (error) {
+                console.log(`No claim transaction for over bet in market ${marketId}`);
+              }
+            }
+
             bets.push({
               marketId,
               isOver: true,
@@ -357,7 +397,30 @@ export async function getBettingHistory(): Promise<Bet[]> {
 
           // Add under bet if exists
           if (userBets.underBet > BigInt(0)) {
-            console.log(`Adding under bet for market ${marketId.toString()}`);
+            // Check if under bet was won
+            const isUnderBetWon = market.settled && market.actualPrice < market.aiPrediction;
+            
+            // Only check claim transaction if bet was won
+            let claimTxHash: string | undefined;
+            if (isUnderBetWon && userBets.hasClaimed) {
+              try {
+                // Get the actual transaction hash from the claim transaction
+                const provider = getProvider();
+                const blockNumber = await provider.getBlockNumber();
+                const events = await contract.queryFilter(
+                  contract.filters.Claimed(marketId, address),
+                  blockNumber - 10000, // Look back 10000 blocks
+                  blockNumber
+                );
+                
+                if (events.length > 0) {
+                  claimTxHash = events[0].transactionHash;
+                }
+              } catch (error) {
+                console.log(`No claim transaction for under bet in market ${marketId}`);
+              }
+            }
+
             bets.push({
               marketId,
               isOver: false,
@@ -374,20 +437,14 @@ export async function getBettingHistory(): Promise<Bet[]> {
             });
           }
         }
-
-        // Reset consecutive errors counter since we found a valid market
-        consecutiveErrors = 0;
-        
-        // Move to previous market
-        marketId -= BigInt(1);
       } catch (error) {
-        console.log(`Error fetching market ${marketId}:`, error);
-        consecutiveErrors++;
-        marketId -= BigInt(1);
+        console.log(`Error processing market ${marketId}:`, error);
+        // Continue with next market even if this one fails
+        continue;
       }
     }
 
-    console.log('Total bets found:', bets.length);
+    console.log('\nTotal bets found:', bets.length);
     // Sort bets by market ID in descending order (newest first)
     return bets.sort((a, b) => Number(b.marketId - a.marketId));
   } catch (error) {
@@ -407,17 +464,16 @@ export function calculateWinnings(
   // Calculate total pool (winning + losing bets)
   const totalPool = totalWinningBets + totalLosingBets;
   
-  // Calculate platform fee amount
-  const platformFeeAmount = (totalPool * PLATFORM_FEE) / FEE_DENOMINATOR;
+  // Calculate winnings before fee
+  const winningsBeforeFee = (betAmount * totalPool) / totalWinningBets;
   
-  // Calculate remaining pool after fee
-  const remainingPool = totalPool - platformFeeAmount;
+  // Calculate fee amount
+  const feeAmount = (winningsBeforeFee * PLATFORM_FEE) / FEE_DENOMINATOR;
   
-  // Calculate winnings based on bet proportion
-  return (betAmount * remainingPool) / totalWinningBets;
+  // Calculate final winnings after fee
+  return winningsBeforeFee - feeAmount;
 }
 
-// Add function to get block explorer URL
 export function getBlockExplorerUrl(txHash: string): string {
   return `https://sepolia.basescan.org/tx/${txHash}`;
 } 

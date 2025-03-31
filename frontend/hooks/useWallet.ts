@@ -29,7 +29,7 @@ export function useWallet(): WalletState {
           setProvider(provider);
         } catch (error) {
           console.error('Error checking connection:', error);
-          setError('Failed to check wallet connection');
+          // Don't set error state here as it's just a check
         }
       }
     };
@@ -46,18 +46,36 @@ export function useWallet(): WalletState {
     try {
       setIsConnecting(true);
       setError(null);
+
+      // Check if MetaMask is locked
       const provider = new ethers.BrowserProvider(window.ethereum);
-      await provider.send('eth_requestAccounts', []);
       const accounts = await provider.listAccounts();
-      if (accounts.length > 0) {
-        setAddress(accounts[0].address);
+      
+      if (accounts.length === 0) {
+        // MetaMask is locked or no accounts available
+        setError('Please unlock MetaMask to connect your wallet');
+        return;
       }
-      setProvider(provider);
+
+      // Request account access
+      await provider.send('eth_requestAccounts', []);
+      const updatedAccounts = await provider.listAccounts();
+      
+      if (updatedAccounts.length > 0) {
+        setAddress(updatedAccounts[0].address);
+        setProvider(provider);
+      } else {
+        setError('No accounts found. Please add an account to MetaMask');
+      }
     } catch (error) {
       console.error('Error connecting wallet:', error);
       if (error instanceof Error) {
         if (error.message.includes('User rejected')) {
           setError('Connection cancelled by user');
+        } else if (error.message.includes('Already processing')) {
+          setError('Please unlock MetaMask and try again');
+        } else if (error.message.includes('Please wait')) {
+          setError('Please unlock MetaMask and try again');
         } else {
           setError(error.message);
         }
@@ -69,17 +87,17 @@ export function useWallet(): WalletState {
     }
   };
 
-  // Auto-connect on mount
-  useEffect(() => {
-    connectWallet();
-  }, []);
-
   // Handle account changes
   useEffect(() => {
     if (typeof window.ethereum === 'undefined') return;
 
     const handleAccountsChanged = (accounts: string[]) => {
       setAddress(accounts[0] || null);
+      if (accounts.length === 0) {
+        // User disconnected their wallet
+        setAddress(null);
+        setProvider(null);
+      }
     };
 
     window.ethereum.on('accountsChanged', handleAccountsChanged);

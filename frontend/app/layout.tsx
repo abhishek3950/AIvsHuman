@@ -3,6 +3,7 @@ import { Inter } from "next/font/google";
 import "./globals.css";
 import { Header } from "@/components/Header";
 import { NetworkStatus } from "@/components/NetworkStatus";
+import { Providers } from "./providers";
 
 const inter = Inter({ subsets: ["latin"] });
 
@@ -17,15 +18,17 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="en">
-      <body className={inter.className}>
-        <div className="min-h-screen bg-gray-50 dark:bg-gray-900">
-          <Header />
-          <main className="container mx-auto px-4 py-8">
-            <NetworkStatus />
-            {children}
-          </main>
-        </div>
+    <html lang="en" suppressHydrationWarning>
+      <body className={inter.className} suppressHydrationWarning>
+        <Providers>
+          <div className="min-h-screen bg-gray-50 dark:bg-gray-900">
+            <Header />
+            <main className="container mx-auto px-4 py-8">
+              <NetworkStatus />
+              {children}
+            </main>
+          </div>
+        </Providers>
       </body>
     </html>
   );

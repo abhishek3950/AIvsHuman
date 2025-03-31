@@ -1,9 +1,7 @@
 "use client";
 
 import { BettingInterface } from "@/components/BettingInterface";
-import { Header } from "@/components/Header";
 import { History } from "@/components/History";
-import { Faucet } from "@/components/Faucet";
 import { useWallet } from "@/hooks/useWallet";
 
 export default function Home() {
@@ -11,7 +9,6 @@ export default function Home() {
 
   return (
     <main className="min-h-screen bg-gray-100 dark:bg-gray-900">
-      <Header />
       <div className="container mx-auto px-4 py-8">
         {error ? (
           <div className="flex flex-col items-center justify-center min-h-[60vh]">
@@ -33,8 +30,7 @@ export default function Home() {
             <div className="lg:col-span-2">
               <BettingInterface />
             </div>
-            <div className="space-y-8">
-              <Faucet />
+            <div>
               <History />
             </div>
           </div>
