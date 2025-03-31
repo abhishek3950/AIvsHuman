@@ -15,6 +15,11 @@ dist/
 # Environment files
 .env
 .env.local
+.env.*.local
+contracts/.env
+contracts/.env.*
+frontend/.env
+frontend/.env.*
 .env.development.local
 .env.test.local
 .env.production.local
