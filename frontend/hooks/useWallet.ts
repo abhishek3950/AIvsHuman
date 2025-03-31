@@ -1,24 +1,69 @@
-import { useState, useEffect } from 'react';
+"use client";
 
-export function useWallet() {
+import { useState, useEffect } from 'react';
+import { ethers } from 'ethers';
+
+interface WalletState {
+  address: string | null;
+  isConnecting: boolean;
+  error: string | null;
+  provider: ethers.BrowserProvider | null;
+  connectWallet: () => Promise<void>;
+}
+
+export function useWallet(): WalletState {
   const [address, setAddress] = useState<string | null>(null);
   const [isConnecting, setIsConnecting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [provider, setProvider] = useState<ethers.BrowserProvider | null>(null);
+
+  useEffect(() => {
+    const checkConnection = async () => {
+      if (typeof window !== 'undefined' && window.ethereum) {
+        try {
+          const provider = new ethers.BrowserProvider(window.ethereum);
+          const accounts = await provider.listAccounts();
+          if (accounts.length > 0) {
+            setAddress(accounts[0].address);
+          }
+          setProvider(provider);
+        } catch (error) {
+          console.error('Error checking connection:', error);
+          setError('Failed to check wallet connection');
+        }
+      }
+    };
+
+    checkConnection();
+  }, []);
 
   const connectWallet = async () => {
-    if (typeof window.ethereum === 'undefined') {
-      setError('Please install MetaMask to use this app');
+    if (typeof window === 'undefined' || !window.ethereum) {
+      setError('Please install MetaMask or another Web3 wallet');
       return;
     }
 
     try {
       setIsConnecting(true);
       setError(null);
-      const accounts = await window.ethereum.request({ method: 'eth_requestAccounts' });
-      setAddress(accounts[0]);
-    } catch (err) {
-      setError('Error connecting wallet');
-      console.error('Error connecting wallet:', err);
+      const provider = new ethers.BrowserProvider(window.ethereum);
+      await provider.send('eth_requestAccounts', []);
+      const accounts = await provider.listAccounts();
+      if (accounts.length > 0) {
+        setAddress(accounts[0].address);
+      }
+      setProvider(provider);
+    } catch (error) {
+      console.error('Error connecting wallet:', error);
+      if (error instanceof Error) {
+        if (error.message.includes('User rejected')) {
+          setError('Connection cancelled by user');
+        } else {
+          setError(error.message);
+        }
+      } else {
+        setError('Failed to connect wallet');
+      }
     } finally {
       setIsConnecting(false);
     }
@@ -50,6 +95,7 @@ export function useWallet() {
     address,
     isConnecting,
     error,
-    connectWallet
+    provider,
+    connectWallet,
   };
 } 
